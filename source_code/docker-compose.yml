@@ -1,0 +1,62 @@
+services:
+  # NestJS Server - Main API
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: flood-server
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - MQTT_BROKER=mqtt://mosquitto:1883
+      - PLATFORMIO_BUILDER_URL=http://platformio-builder:5000  # Internal Docker network uses port 5000
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+      - ./storage/firmware:/storage/firmware
+      - ./storage/uploads:/storage/uploads
+    depends_on:
+      - mosquitto
+      - platformio-builder
+    networks:
+      - flood-network
+    restart: unless-stopped
+
+  # PlatformIO Builder Service
+  platformio-builder:
+    build:
+      context: ./docker/platformio-builder
+      dockerfile: Dockerfile
+    container_name: platformio-builder
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./storage/builds:/builds
+      - platformio-cache:/root/.platformio
+    networks:
+      - flood-network
+    restart: unless-stopped
+
+  # MQTT Broker
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./docker/mosquitto/config:/mosquitto/config
+      - ./storage/mosquitto/data:/mosquitto/data
+      - ./storage/mosquitto/log:/mosquitto/log
+    networks:
+      - flood-network
+    restart: unless-stopped
+
+networks:
+  flood-network:
+    driver: bridge
+
+volumes:
+  platformio-cache:
