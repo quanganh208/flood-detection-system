@@ -2,6 +2,8 @@ import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import FormData from 'form-data';
+import * as fs from 'fs';
+import * as path from 'path';
 import { BuildStreamService } from './build-stream.service';
 import { BuildStateService, BuildState } from './build-state.service';
 import { BuildStatus } from '../dto/build-response.dto';
@@ -10,6 +12,7 @@ import { BuildStatus } from '../dto/build-response.dto';
 export class PlatformIOClientService {
   private readonly logger = new Logger(PlatformIOClientService.name);
   private readonly builderUrl: string;
+  private readonly firmwareStorageDir: string;
 
   private activeConnections = new Map<string, boolean>();
 
@@ -21,6 +24,12 @@ export class PlatformIOClientService {
     this.builderUrl =
       this.configService.get<string>('PLATFORMIO_BUILDER_URL') || 'http://platformio-builder:5000';
     this.logger.log(`PlatformIO Builder URL: ${this.builderUrl}`);
+
+    this.firmwareStorageDir = path.join(process.cwd(), '..', 'storage', 'firmware');
+    if (!fs.existsSync(this.firmwareStorageDir)) {
+      fs.mkdirSync(this.firmwareStorageDir, { recursive: true });
+    }
+    this.logger.log(`Firmware storage directory: ${this.firmwareStorageDir}`);
   }
 
   async startBuild(buildId: string, files: Express.Multer.File[]): Promise<void> {
@@ -114,6 +123,31 @@ export class PlatformIOClientService {
     }
   }
 
+  private async downloadFirmware(buildId: string, builderBuildId: string): Promise<void> {
+    try {
+      this.logger.log(`Downloading firmware for build: ${buildId} (builder: ${builderBuildId})`);
+
+      const downloadUrl = `${this.builderUrl}/download/${builderBuildId}`;
+      const firmwarePath = path.join(this.firmwareStorageDir, `${buildId}.bin`);
+
+      const response = await axios.get(downloadUrl, {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+      });
+
+      fs.writeFileSync(firmwarePath, Buffer.from(response.data));
+
+      const fileStats = fs.statSync(firmwarePath);
+      this.logger.log(
+        `Firmware saved successfully: ${buildId}.bin (${fileStats.size} bytes) at ${firmwarePath}`,
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to download firmware for build ${buildId}: ${errorMessage}`);
+      throw error;
+    }
+  }
+
   private consumeSSEStream(buildId: string, stream: NodeJS.ReadableStream): void {
     let buffer = '';
 
@@ -204,16 +238,17 @@ export class PlatformIOClientService {
           buildId: data.build_id,
         };
 
-      case 'build_complete':
+      case 'build_complete': {
+        const successValue = !data.code || data.code === 'SUCCESS';
         return {
-          success: !data.code || data.code === 'SUCCESS',
+          success: successValue,
           buildId: data.build_id,
-          firmwareUrl: data.firmware_url || data.firmwareUrl,
           size: data.size,
           md5: data.md5,
           duration: data.duration,
           timestamp: data.timestamp,
         };
+      }
 
       case 'build_started':
         return {
@@ -265,15 +300,36 @@ export class PlatformIOClientService {
         updates.percent = eventData.percent as number;
         break;
 
-      case 'build_complete':
-        updates.status = eventData.success ? BuildStatus.COMPLETED : BuildStatus.FAILED;
+      case 'build_complete': {
+        const isSuccess = !eventData.code || eventData.code === 'SUCCESS';
+
+        updates.status = isSuccess ? BuildStatus.COMPLETED : BuildStatus.FAILED;
         updates.completedAt = new Date();
         updates.duration = eventData.duration as number;
-        updates.firmwareUrl = eventData.firmwareUrl as string;
         updates.size = eventData.size as number;
         updates.md5 = eventData.md5 as string;
         updates.percent = 100;
+
+        if (isSuccess) {
+          const state = this.buildStateService.getState(buildId);
+          this.logger.log(
+            `Build complete - success: true, builderBuildId: ${state?.builderBuildId}`,
+          );
+
+          if (state?.builderBuildId) {
+            void this.downloadFirmware(buildId, state.builderBuildId).catch((error: Error) => {
+              this.logger.error(`Failed to download firmware for ${buildId}: ${error.message}`);
+            });
+          } else {
+            this.logger.warn(
+              `Cannot download firmware - builderBuildId not found for build: ${buildId}`,
+            );
+          }
+        } else {
+          this.logger.log('Build complete - success: false (build failed)');
+        }
         break;
+      }
 
       case 'error':
         updates.status = BuildStatus.FAILED;

@@ -1,914 +1,1485 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ESP32 OTA Update Manager</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Tailwind Configuration -->
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              border: 'hsl(var(--border))',
+              input: 'hsl(var(--input))',
+              ring: 'hsl(var(--ring))',
+              background: 'hsl(var(--background))',
+              foreground: 'hsl(var(--foreground))',
+              primary: {
+                DEFAULT: 'hsl(var(--primary))',
+                foreground: 'hsl(var(--primary-foreground))',
+              },
+              secondary: {
+                DEFAULT: 'hsl(var(--secondary))',
+                foreground: 'hsl(var(--secondary-foreground))',
+              },
+              destructive: {
+                DEFAULT: 'hsl(var(--destructive))',
+                foreground: 'hsl(var(--destructive-foreground))',
+              },
+              muted: {
+                DEFAULT: 'hsl(var(--muted))',
+                foreground: 'hsl(var(--muted-foreground))',
+              },
+              accent: {
+                DEFAULT: 'hsl(var(--accent))',
+                foreground: 'hsl(var(--accent-foreground))',
+              },
+              card: {
+                DEFAULT: 'hsl(var(--card))',
+                foreground: 'hsl(var(--card-foreground))',
+              },
+            },
+            borderRadius: {
+              lg: 'var(--radius)',
+              md: 'calc(var(--radius) - 2px)',
+              sm: 'calc(var(--radius) - 4px)',
+            },
+            keyframes: {
+              'accordion-down': {
+                from: { height: 0 },
+                to: { height: 'var(--radix-accordion-content-height)' },
+              },
+              'accordion-up': {
+                from: { height: 'var(--radix-accordion-content-height)' },
+                to: { height: 0 },
+              },
+              'fade-in': {
+                from: { opacity: 0, transform: 'translateY(10px)' },
+                to: { opacity: 1, transform: 'translateY(0)' },
+              },
+              spin: {
+                to: { transform: 'rotate(360deg)' },
+              },
+              'pulse-glow': {
+                '0%, 100%': { opacity: 1 },
+                '50%': { opacity: 0.5 },
+              },
+              'pulse-border': {
+                '0%, 100%': {
+                  borderColor: 'hsl(var(--primary) / 0.3)',
+                  boxShadow: '0 0 0 0 hsl(var(--primary) / 0.3)',
+                },
+                '50%': {
+                  borderColor: 'hsl(var(--primary) / 0.6)',
+                  boxShadow: '0 0 0 4px hsl(var(--primary) / 0.1)',
+                },
+              },
+            },
+            animation: {
+              'accordion-down': 'accordion-down 0.2s ease-out',
+              'accordion-up': 'accordion-up 0.2s ease-out',
+              'fade-in': 'fade-in 0.3s ease-out',
+              spin: 'spin 1s linear infinite',
+              'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+              'pulse-border': 'pulse-border 2s ease-in-out infinite',
+            },
+          },
+        },
+      };
+    </script>
+
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+      @layer base {
+        :root {
+          --background: 0 0% 100%;
+          --foreground: 222.2 84% 4.9%;
+          --card: 0 0% 100%;
+          --card-foreground: 222.2 84% 4.9%;
+          --popover: 0 0% 100%;
+          --popover-foreground: 222.2 84% 4.9%;
+          --primary: 3.7 100% 40%;
+          --primary-foreground: 0 0% 100%;
+          --secondary: 210 40% 96.1%;
+          --secondary-foreground: 222.2 47.4% 11.2%;
+          --muted: 210 40% 96.1%;
+          --muted-foreground: 215.4 16.3% 46.9%;
+          --accent: 210 40% 96.1%;
+          --accent-foreground: 222.2 47.4% 11.2%;
+          --destructive: 0 84.2% 60.2%;
+          --destructive-foreground: 0 0% 100%;
+          --border: 214.3 31.8% 91.4%;
+          --input: 214.3 31.8% 91.4%;
+          --ring: 3.7 100% 40%;
+          --radius: 0.5rem;
+        }
 
-      body {
-        font-family:
-          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
-          Cantarell, sans-serif;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-        padding: 20px;
-      }
-
-      .container {
-        max-width: 900px;
-        margin: 0 auto;
-      }
-
-      .header {
-        text-align: center;
-        color: white;
-        margin-bottom: 30px;
-      }
-
-      .header h1 {
-        font-size: 2.5em;
-        margin-bottom: 10px;
-      }
-
-      .header p {
-        opacity: 0.9;
-        font-size: 1.1em;
-      }
-
-      .card {
-        background: white;
-        border-radius: 12px;
-        padding: 30px;
-        margin-bottom: 20px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-      }
-
-      .card h2 {
-        color: #333;
-        margin-bottom: 20px;
-        font-size: 1.5em;
-        border-bottom: 2px solid #667eea;
-        padding-bottom: 10px;
-      }
-
-      .upload-area {
-        border: 2px dashed #667eea;
-        border-radius: 8px;
-        padding: 40px;
-        text-align: center;
-        cursor: pointer;
-        transition: all 0.3s;
-        background: #f8f9fa;
-      }
-
-      .upload-area:hover {
-        border-color: #764ba2;
-        background: #f0f0f0;
-      }
-
-      .upload-area.dragover {
-        background: #e8eaf6;
-        border-color: #764ba2;
-      }
-
-      .upload-icon {
-        font-size: 48px;
-        color: #667eea;
-        margin-bottom: 15px;
-      }
-
-      #fileInput {
-        display: none;
-      }
-
-      .file-list {
-        margin-top: 20px;
-      }
-
-      .file-item {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 10px 15px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        margin-bottom: 8px;
-      }
-
-      .file-item .name {
-        flex: 1;
-        color: #333;
-      }
-
-      .file-item .size {
-        color: #666;
-        margin-right: 10px;
-        font-size: 0.9em;
-      }
-
-      .file-item .remove {
-        color: #dc3545;
-        cursor: pointer;
-        font-weight: bold;
-      }
-
-      .btn {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 12px 30px;
-        border-radius: 6px;
-        font-size: 1em;
-        cursor: pointer;
-        transition: all 0.3s;
-        font-weight: 600;
-      }
-
-      .btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-      }
-
-      .btn:disabled {
-        background: #ccc;
-        cursor: not-allowed;
-        transform: none;
-      }
-
-      .btn-full {
-        width: 100%;
-        margin-top: 20px;
-      }
-
-      .status {
-        margin-top: 20px;
-        padding: 15px;
-        border-radius: 6px;
-        display: none;
-      }
-
-      .status.success {
-        background: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
-      }
-
-      .status.error {
-        background: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
-      }
-
-      .status.info {
-        background: #d1ecf1;
-        color: #0c5460;
-        border: 1px solid #bee5eb;
-      }
-
-      .firmware-list {
-        margin-top: 20px;
-      }
-
-      .firmware-item {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 15px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        margin-bottom: 10px;
-      }
-
-      .firmware-info {
-        flex: 1;
-      }
-
-      .firmware-id {
-        font-weight: 600;
-        color: #333;
-        font-family: monospace;
-      }
-
-      .firmware-meta {
-        color: #666;
-        font-size: 0.9em;
-        margin-top: 5px;
-      }
-
-      .firmware-actions {
-        display: flex;
-        gap: 10px;
-      }
-
-      .btn-small {
-        padding: 6px 12px;
-        font-size: 0.9em;
-      }
-
-      .btn-download {
-        background: #28a745;
-      }
-
-      .btn-delete {
-        background: #dc3545;
-      }
-
-      .loading {
-        display: inline-block;
-        width: 20px;
-        height: 20px;
-        border: 3px solid rgba(255, 255, 255, 0.3);
-        border-radius: 50%;
-        border-top-color: white;
-        animation: spin 1s ease-in-out infinite;
-      }
-
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
+        .dark {
+          --background: 222.2 84% 4.9%;
+          --foreground: 210 40% 98%;
+          --card: 222.2 84% 4.9%;
+          --card-foreground: 210 40% 98%;
+          --popover: 222.2 84% 4.9%;
+          --popover-foreground: 210 40% 98%;
+          --primary: 3.7 100% 40%;
+          --primary-foreground: 0 0% 100%;
+          --secondary: 217.2 32.6% 17.5%;
+          --secondary-foreground: 210 40% 98%;
+          --muted: 217.2 32.6% 17.5%;
+          --muted-foreground: 215 20.2% 65.1%;
+          --accent: 217.2 32.6% 17.5%;
+          --accent-foreground: 210 40% 98%;
+          --destructive: 0 62.8% 30.6%;
+          --destructive-foreground: 210 40% 98%;
+          --border: 217.2 32.6% 17.5%;
+          --input: 217.2 32.6% 17.5%;
+          --ring: 3.7 100% 40%;
         }
       }
 
-      .build-log {
-        background: #1e1e1e;
-        color: #d4d4d4;
-        padding: 15px;
-        border-radius: 6px;
-        font-family: 'Courier New', monospace;
-        font-size: 0.85em;
-        max-height: 300px;
-        overflow-y: auto;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        margin-top: 15px;
+      * {
+        border-color: hsl(var(--border));
       }
 
-      .build-log .log-debug {
-        color: #858585;
+      body {
+        background-color: hsl(var(--background));
+        color: hsl(var(--foreground));
+        font-feature-settings:
+          'rlig' 1,
+          'calt' 1;
       }
 
-      .build-log .log-info {
-        color: #d4d4d4;
+      /* Enhanced background for dark mode */
+      body.dark {
+        background-image:
+          radial-gradient(at 0% 0%, rgba(204, 13, 0, 0.08) 0px, transparent 50%),
+          radial-gradient(at 100% 0%, rgba(204, 13, 0, 0.05) 0px, transparent 50%),
+          radial-gradient(at 100% 100%, rgba(204, 13, 0, 0.06) 0px, transparent 50%);
       }
 
-      .build-log .log-warning {
-        color: #ffa500;
+      /* Light mode subtle background */
+      body:not(.dark) {
+        background-image:
+          radial-gradient(at 0% 0%, rgba(204, 13, 0, 0.03) 0px, transparent 50%),
+          radial-gradient(at 100% 100%, rgba(204, 13, 0, 0.02) 0px, transparent 50%);
       }
 
-      .build-log .log-error {
-        color: #f44336;
-        font-weight: bold;
+      /* Custom scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
       }
 
-      #build-progress {
-        margin: 15px 0;
-        padding: 15px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        border: 1px solid #dee2e6;
+      ::-webkit-scrollbar-track {
+        background-color: hsl(var(--muted));
       }
 
-      .progress-info {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10px;
+      ::-webkit-scrollbar-thumb {
+        background-color: hsl(var(--muted-foreground) / 0.3);
+        border-radius: 0.375rem;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background-color: hsl(var(--muted-foreground) / 0.5);
+      }
+
+      /* Log level colors */
+      .log-debug {
+        color: #64748b;
+        opacity: 0.8;
+      }
+
+      .log-info {
+        color: #e2e8f0;
+      }
+
+      .log-warning {
+        color: #fbbf24;
+        font-weight: 500;
+      }
+
+      .log-error {
+        color: #f87171;
         font-weight: 600;
-        color: #333;
+        background-color: rgba(248, 113, 113, 0.1);
+        padding: 2px 6px;
+        border-radius: 3px;
+        display: inline-block;
       }
 
-      #build-phase {
-        font-size: 0.95em;
-        color: #667eea;
+      .log-success {
+        color: #4ade80;
+        font-weight: 500;
       }
 
-      #build-percent {
-        font-size: 0.9em;
-        color: #666;
+      /* Drag and drop styles */
+      .upload-area.dragover {
+        border-color: hsl(var(--primary));
+        background-color: hsl(var(--primary) / 0.05);
+        transform: scale(1.01);
       }
 
-      .progress-bar-container {
-        width: 100%;
-        height: 24px;
-        background: #e9ecef;
-        border-radius: 12px;
-        overflow: hidden;
+      /* Horizontal Stepper Styles */
+      .stepper-container {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         position: relative;
       }
 
-      .progress-bar {
-        height: 100%;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        width: 0%;
-        transition: width 0.3s ease;
-        border-radius: 12px;
+      .stepper-step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+        position: relative;
+        flex: 1;
+      }
+
+      .stepper-step:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        top: 16px;
+        left: 50%;
+        width: 100%;
+        height: 2px;
+        background-color: hsl(var(--muted));
+        z-index: 0;
+      }
+
+      .stepper-step.completed:not(:last-child)::after {
+        background-color: hsl(var(--primary));
+      }
+
+      .stepper-step.active:not(:last-child)::after {
+        background: linear-gradient(to right, hsl(var(--primary)) 50%, hsl(var(--muted)) 50%);
+      }
+
+      .stepper-circle {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        color: white;
+        font-size: 0.875rem;
         font-weight: 600;
-        font-size: 0.85em;
+        transition: all 0.2s;
+        position: relative;
+        z-index: 1;
+        background-color: hsl(var(--card));
       }
 
-      #cancel-btn {
-        background: #dc3545;
-        color: white;
-        margin-left: 10px;
-        display: inline-block;
-        padding: 12px 24px;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 1em;
-        font-weight: 600;
-        transition: all 0.3s;
+      .stepper-step.pending .stepper-circle {
+        background-color: hsl(var(--muted));
+        color: hsl(var(--muted-foreground));
+        border: 2px solid hsl(var(--muted));
       }
 
-      #cancel-btn:hover {
-        background: #c82333;
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(220, 53, 69, 0.4);
+      .stepper-step.active .stepper-circle {
+        background-color: hsl(var(--primary));
+        color: hsl(var(--primary-foreground));
+        border: 2px solid hsl(var(--primary));
       }
 
-      #cancel-btn:disabled {
-        background: #ccc;
-        cursor: not-allowed;
-        transform: none;
-        box-shadow: none;
+      .stepper-step.completed .stepper-circle {
+        background-color: hsl(var(--primary));
+        color: hsl(var(--primary-foreground));
+        border: 2px solid hsl(var(--primary));
       }
 
-      .button-group {
-        display: flex;
-        gap: 10px;
-        margin-top: 20px;
+      .stepper-label {
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-align: center;
+        transition: color 0.2s;
       }
 
-      .button-group .btn {
-        flex: 1;
-        margin: 0;
+      .stepper-step.pending .stepper-label {
+        color: hsl(var(--muted-foreground));
       }
 
-      .build-metadata {
-        margin-top: 10px;
-        padding: 10px;
-        background: #e8f5e9;
-        border-radius: 6px;
-        font-size: 0.9em;
-        color: #2e7d32;
+      .stepper-step.active .stepper-label {
+        color: hsl(var(--primary));
       }
 
-      .build-metadata strong {
-        color: #1b5e20;
+      .stepper-step.completed .stepper-label {
+        color: hsl(var(--foreground));
+      }
+
+      /* Upload Card Ready State */
+      .upload-card-ready {
+        animation: pulse-border 2s ease-in-out infinite;
+      }
+
+      /* Build Button Pulse */
+      .build-btn-ready {
+        animation: pulse-glow 2s ease-in-out infinite;
       }
     </style>
   </head>
-  <body>
-    <div class="container">
-      <div class="header">
-        <h1>🚀 ESP32 OTA Update Manager</h1>
-        <p>
-          Upload Arduino/PlatformIO source code to build firmware automatically
+  <body class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+    <!-- Theme Toggle -->
+    <div class="fixed top-4 right-4 z-50">
+      <button
+        id="themeToggle"
+        class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 w-10"
+      >
+        <i
+          data-lucide="sun"
+          class="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0"
+        ></i>
+        <i
+          data-lucide="moon"
+          class="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100"
+        ></i>
+        <span class="sr-only">Toggle theme</span>
+      </button>
+    </div>
+
+    <div class="container mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <!-- Header -->
+      <div class="mb-10 text-center animate-fade-in">
+        <div class="inline-flex items-center justify-center mb-4">
+          <i data-lucide="cpu" class="h-12 w-12 text-primary"></i>
+        </div>
+        <h1 class="text-4xl font-bold tracking-tight text-foreground sm:text-5xl mb-3">
+          ESP32 OTA Update Manager
+        </h1>
+        <p class="text-lg text-muted-foreground max-w-2xl mx-auto">
+          Build ESP32 firmware from source code with real-time compilation progress
         </p>
       </div>
 
-      <!-- Upload Card -->
-      <div class="card">
-        <h2>📤 Upload Source Code</h2>
+      <!-- Status Messages -->
+      <div id="statusMessage" class="hidden mb-12 animate-fade-in"></div>
 
-        <div class="upload-area" id="uploadArea">
-          <div class="upload-icon">📁</div>
-          <h3>Drag & Drop files here</h3>
-          <p style="margin: 10px 0; color: #666">or click to browse</p>
-          <p style="color: #999; font-size: 0.9em">
-            Required: <strong>platformio.ini</strong> +
-            <strong>*.ino or *.cpp</strong>
-          </p>
-        </div>
+      <!-- 2 Column Layout -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- LEFT COLUMN - Upload Card (Sticky) -->
+        <div class="lg:sticky lg:top-4 lg:self-start">
+          <div
+            id="uploadCard"
+            class="rounded-lg border bg-card text-card-foreground shadow-lg animate-fade-in transition-all duration-300"
+            style="animation-delay: 0.1s"
+          >
+            <!-- Card Header -->
+            <div class="flex flex-col space-y-1.5 p-6 pb-4 border-b">
+              <div class="flex items-center gap-2">
+                <i data-lucide="upload" class="h-5 w-5 text-primary"></i>
+                <h3 class="text-xl font-semibold leading-none tracking-tight">Upload Files</h3>
+              </div>
+              <p class="text-sm text-muted-foreground">
+                Upload source code and configuration files
+              </p>
+            </div>
 
-        <input type="file" id="fileInput" multiple accept=".ino,.cpp,.h,.ini" />
+            <!-- Card Body -->
+            <div class="p-6 space-y-6">
+              <!-- SECTION 1: Source Code Files -->
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <i data-lucide="code-2" class="h-4 w-4 text-primary"></i>
+                    <h4 class="text-sm font-semibold">Source Code Files</h4>
+                  </div>
+                  <span
+                    id="codeFileBadge"
+                    class="hidden text-xs px-2.5 py-1 rounded-full bg-muted text-muted-foreground font-medium"
+                  >
+                    0 files
+                  </span>
+                </div>
 
-        <div class="file-list" id="fileList"></div>
+                <div
+                  class="upload-area border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all duration-200 hover:border-primary hover:bg-accent/50"
+                  id="codeUploadArea"
+                >
+                  <div class="flex flex-col items-center gap-2">
+                    <div class="rounded-full bg-primary/10 p-2.5">
+                      <i data-lucide="file-code" class="h-6 w-6 text-primary"></i>
+                    </div>
+                    <div>
+                      <p class="text-sm font-medium mb-1">Drag & drop code files here</p>
+                      <p class="text-xs text-muted-foreground">or click to browse</p>
+                    </div>
+                    <p class="text-xs text-muted-foreground">
+                      Accepted: <span class="font-mono text-primary">.ino, .cpp, .h</span>
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="file"
+                  id="codeFileInput"
+                  multiple
+                  accept=".ino,.cpp,.h"
+                  class="hidden"
+                />
 
-        <div class="button-group">
-          <button class="btn" id="buildBtn" disabled>
-            Build Firmware
-          </button>
-          <button id="cancel-btn" style="display: none" onclick="cancelBuild()">
-            Cancel Build
-          </button>
-        </div>
+                <!-- Code Files List -->
+                <div id="codeFileList" class="space-y-2"></div>
+              </div>
 
-        <div id="build-progress" style="display: none">
-          <div class="progress-info">
-            <span id="build-phase">Initializing...</span>
-            <span id="build-percent">0%</span>
+              <!-- Visual Separator -->
+              <div class="border-t"></div>
+
+              <!-- SECTION 2: Configuration File -->
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <i data-lucide="settings" class="h-4 w-4 text-primary"></i>
+                    <h4 class="text-sm font-semibold">Configuration File</h4>
+                  </div>
+                  <span
+                    id="configFileBadge"
+                    class="text-xs px-2.5 py-1 rounded-full bg-muted text-muted-foreground font-medium"
+                  >
+                    Not uploaded
+                  </span>
+                </div>
+
+                <div
+                  class="upload-area border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all duration-200 hover:border-primary hover:bg-accent/50"
+                  id="configUploadArea"
+                >
+                  <div class="flex flex-col items-center gap-2">
+                    <div class="rounded-full bg-primary/10 p-2.5">
+                      <i data-lucide="file-cog" class="h-6 w-6 text-primary"></i>
+                    </div>
+                    <div>
+                      <p class="text-sm font-medium mb-1">Drag & drop platformio.ini here</p>
+                      <p class="text-xs text-muted-foreground">or click to browse</p>
+                    </div>
+                    <p class="text-xs text-muted-foreground">
+                      Required: <span class="font-mono text-primary">platformio.ini</span>
+                    </p>
+                  </div>
+                </div>
+                <input type="file" id="configFileInput" accept=".ini" class="hidden" />
+
+                <!-- Config File Display -->
+                <div id="configFileDisplay"></div>
+              </div>
+            </div>
           </div>
-          <div class="progress-bar-container">
-            <div id="progress-bar" class="progress-bar"></div>
-          </div>
         </div>
 
-        <div class="status" id="status"></div>
-        <div class="build-log" id="buildLog" style="display: none"></div>
-      </div>
+        <!-- RIGHT COLUMN - Build & Firmwares (Scrollable) -->
+        <div class="space-y-6">
+          <!-- Build Control Card -->
+          <div
+            class="rounded-lg border bg-card text-card-foreground shadow-lg animate-fade-in"
+            style="animation-delay: 0.2s"
+          >
+            <!-- Card Header with Status Badge -->
+            <div class="flex flex-col space-y-1.5 p-6 pb-4 border-b">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="hammer" class="h-5 w-5 text-primary"></i>
+                  <h3 class="text-xl font-semibold leading-none tracking-tight">Build Firmware</h3>
+                </div>
+                <span
+                  id="buildStatusBadge"
+                  class="text-sm px-3 py-1.5 rounded-full bg-muted text-muted-foreground font-medium"
+                >
+                  Waiting
+                </span>
+              </div>
+            </div>
 
-      <!-- Firmware List Card -->
-      <div class="card">
-        <h2>📦 Available Firmwares</h2>
-        <button class="btn btn-small" onclick="loadFirmwares()">
-          🔄 Refresh List
-        </button>
-        <div class="firmware-list" id="firmwareList"></div>
+            <!-- Card Body -->
+            <div class="p-6 space-y-6">
+              <!-- Horizontal Stepper -->
+              <div class="stepper-container py-2">
+                <div class="stepper-step pending" id="stepperUpload">
+                  <div class="stepper-circle">
+                    <span class="step-number">1</span>
+                    <i data-lucide="check" class="h-4 w-4 hidden step-check"></i>
+                  </div>
+                  <span class="stepper-label">Upload Files</span>
+                </div>
+                <div class="stepper-step pending" id="stepperBuild">
+                  <div class="stepper-circle">
+                    <span class="step-number">2</span>
+                    <i data-lucide="check" class="h-4 w-4 hidden step-check"></i>
+                    <i data-lucide="loader" class="h-4 w-4 hidden step-loading animate-spin"></i>
+                  </div>
+                  <span class="stepper-label">Build Firmware</span>
+                </div>
+                <div class="stepper-step pending" id="stepperComplete">
+                  <div class="stepper-circle">
+                    <span class="step-number">3</span>
+                    <i data-lucide="check" class="h-4 w-4 hidden step-check"></i>
+                  </div>
+                  <span class="stepper-label">Download</span>
+                </div>
+              </div>
+
+              <!-- Build Actions -->
+              <div class="flex gap-3">
+                <button
+                  id="buildBtn"
+                  disabled
+                  class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 flex-1"
+                >
+                  <i data-lucide="play" class="mr-2 h-4 w-4"></i>
+                  Build Firmware
+                </button>
+                <button
+                  id="cancelBtn"
+                  class="hidden inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-amber-600 text-white hover:bg-amber-700 h-10 px-4 py-2"
+                >
+                  <i data-lucide="x-circle" class="mr-2 h-4 w-4"></i>
+                  Cancel Build
+                </button>
+              </div>
+
+              <!-- Build Requirements Notice -->
+              <div
+                id="buildRequirements"
+                class="flex items-start gap-3 p-4 rounded-lg border bg-muted/50"
+              >
+                <i
+                  data-lucide="info"
+                  class="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5"
+                ></i>
+                <div class="flex-1 text-sm text-muted-foreground">
+                  <p class="font-medium mb-1">Requirements to build:</p>
+                  <ul class="space-y-1 text-xs">
+                    <li id="req1" class="flex items-center gap-2">
+                      <i data-lucide="circle" class="h-3 w-3"></i>
+                      <span>Upload at least one source code file (.ino, .cpp, or .h)</span>
+                    </li>
+                    <li id="req2" class="flex items-center gap-2">
+                      <i data-lucide="circle" class="h-3 w-3"></i>
+                      <span>Upload platformio.ini configuration file</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <!-- Build Progress (shown when building) -->
+              <div id="buildProgressSection" class="hidden space-y-4 pt-2">
+                <!-- Progress Info -->
+                <div class="flex items-center justify-between text-sm">
+                  <span id="buildPhase" class="font-medium text-primary">Initializing...</span>
+                  <span id="buildPercent" class="text-muted-foreground">0%</span>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="w-full h-3 bg-secondary rounded-full overflow-hidden">
+                  <div
+                    id="progressBar"
+                    class="h-full bg-gradient-to-r from-primary to-red-600 transition-all duration-300 ease-out"
+                    style="width: 0%"
+                  ></div>
+                </div>
+              </div>
+
+              <!-- Build Log (Always Visible) -->
+              <div id="buildLogContainer" class="hidden">
+                <div
+                  class="rounded-md border border-slate-700 bg-slate-950/95 overflow-hidden shadow-lg"
+                >
+                  <div
+                    class="flex items-center justify-between px-4 py-2.5 border-b border-slate-800 bg-slate-900/80"
+                  >
+                    <div class="flex items-center gap-2">
+                      <i data-lucide="terminal" class="h-3.5 w-3.5 text-emerald-400"></i>
+                      <span class="text-xs font-semibold text-slate-200 tracking-wide"
+                        >BUILD OUTPUT</span
+                      >
+                    </div>
+                    <button
+                      id="clearLogBtn"
+                      class="inline-flex items-center justify-center rounded-sm text-xs hover:bg-slate-800 hover:text-slate-200 h-6 w-6 transition-colors"
+                      title="Clear log"
+                    >
+                      <i data-lucide="trash-2" class="h-3 w-3 text-slate-400"></i>
+                    </button>
+                  </div>
+                  <div
+                    id="buildLog"
+                    class="p-4 font-mono text-xs leading-relaxed h-96 overflow-y-auto bg-slate-950/50"
+                    style="line-height: 1.6"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Available Firmwares Card -->
+          <div
+            class="rounded-lg border bg-card text-card-foreground shadow-lg animate-fade-in"
+            style="animation-delay: 0.3s"
+          >
+            <div class="flex flex-col space-y-1.5 p-6 pb-4 border-b">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="package" class="h-5 w-5 text-primary"></i>
+                  <h3 class="text-xl font-semibold leading-none tracking-tight">
+                    Available Firmwares
+                  </h3>
+                </div>
+                <button
+                  id="refreshFirmwaresBtn"
+                  class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3"
+                >
+                  <i data-lucide="refresh-cw" class="mr-2 h-4 w-4"></i>
+                  Refresh
+                </button>
+              </div>
+              <p class="text-sm text-muted-foreground">
+                Download or manage your built firmware files
+              </p>
+            </div>
+            <div class="p-6 pt-4">
+              <div id="firmwareList" class="space-y-3"></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
     <script>
-      let selectedFiles = [];
-      let currentBuildId = null;
-      let currentEventSource = null;
-      let buildStartTime = null;
+      lucide.createIcons();
 
-      const uploadArea = document.getElementById('uploadArea');
-      const fileInput = document.getElementById('fileInput');
-      const fileList = document.getElementById('fileList');
-      const buildBtn = document.getElementById('buildBtn');
-      const cancelBtn = document.getElementById('cancel-btn');
-      const statusDiv = document.getElementById('status');
-      const buildLogDiv = document.getElementById('buildLog');
-      const progressDiv = document.getElementById('build-progress');
-      const progressBar = document.getElementById('progress-bar');
-      const buildPhase = document.getElementById('build-phase');
-      const buildPercent = document.getElementById('build-percent');
+      const themeToggle = document.getElementById('themeToggle');
+      const htmlElement = document.documentElement;
 
-      uploadArea.addEventListener('click', () => fileInput.click());
-
-      uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadArea.classList.add('dragover');
+      themeToggle.addEventListener('click', () => {
+        htmlElement.classList.toggle('dark');
+        localStorage.setItem('theme', htmlElement.classList.contains('dark') ? 'dark' : 'light');
+        lucide.createIcons();
       });
 
-      uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('dragover');
-      });
-
-      uploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        uploadArea.classList.remove('dragover');
-        handleFiles(e.dataTransfer.files);
-      });
-
-      fileInput.addEventListener('change', (e) => {
-        handleFiles(e.target.files);
-      });
-
-      function handleFiles(files) {
-        selectedFiles = Array.from(files);
-        renderFileList();
-        updateBuildButton();
+      const savedTheme = localStorage.getItem('theme') || 'dark';
+      if (savedTheme === 'light') {
+        htmlElement.classList.remove('dark');
       }
+      document.addEventListener('DOMContentLoaded', () => {
+        let codeFiles = [];
+        let configFile = null;
+        let currentBuildId = null;
+        let currentEventSource = null;
+        let buildStartTime = null;
 
-      function renderFileList() {
-        if (selectedFiles.length === 0) {
-          fileList.innerHTML = '';
-          return;
+        const codeUploadArea = document.getElementById('codeUploadArea');
+        const codeFileInput = document.getElementById('codeFileInput');
+        const codeFileList = document.getElementById('codeFileList');
+        const codeFileBadge = document.getElementById('codeFileBadge');
+
+        const configUploadArea = document.getElementById('configUploadArea');
+        const configFileInput = document.getElementById('configFileInput');
+        const configFileDisplay = document.getElementById('configFileDisplay');
+        const configFileBadge = document.getElementById('configFileBadge');
+
+        const uploadCard = document.getElementById('uploadCard');
+        const buildBtn = document.getElementById('buildBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const statusMessage = document.getElementById('statusMessage');
+        const buildStatusBadge = document.getElementById('buildStatusBadge');
+
+        const buildProgressSection = document.getElementById('buildProgressSection');
+        const progressBar = document.getElementById('progressBar');
+        const buildPhase = document.getElementById('buildPhase');
+        const buildPercent = document.getElementById('buildPercent');
+
+        const buildLogContainer = document.getElementById('buildLogContainer');
+        const buildLog = document.getElementById('buildLog');
+        const clearLogBtn = document.getElementById('clearLogBtn');
+
+        const firmwareList = document.getElementById('firmwareList');
+        const refreshFirmwaresBtn = document.getElementById('refreshFirmwaresBtn');
+
+        // Stepper elements
+        const stepperUpload = document.getElementById('stepperUpload');
+        const stepperBuild = document.getElementById('stepperBuild');
+        const stepperComplete = document.getElementById('stepperComplete');
+
+        const req1 = document.getElementById('req1');
+        const req2 = document.getElementById('req2');
+
+        // Validate all required elements exist
+        const requiredElements = {
+          codeUploadArea,
+          codeFileInput,
+          codeFileList,
+          codeFileBadge,
+          configUploadArea,
+          configFileInput,
+          configFileDisplay,
+          configFileBadge,
+          buildBtn,
+          cancelBtn,
+          uploadCard,
+          statusMessage,
+          buildStatusBadge,
+          stepperUpload,
+          stepperBuild,
+          stepperComplete,
+          req1,
+          req2,
+        };
+
+        const missingElements = Object.entries(requiredElements)
+          .filter(([name, element]) => !element)
+          .map(([name]) => name);
+
+        if (missingElements.length > 0) {
+          alert('Critical error: Page elements not loaded. Please refresh the page.');
+          return; // Stop execution
         }
 
-        fileList.innerHTML =
-          '<h3 style="margin-bottom: 10px;">Selected Files:</h3>';
+        // ============================================
+        // ATTACH EVENT LISTENERS
+        // ============================================
 
-        selectedFiles.forEach((file, index) => {
-          const div = document.createElement('div');
-          div.className = 'file-item';
-          div.innerHTML = `
-                    <span class="name">📄 ${file.name}</span>
-                    <span class="size">${formatBytes(file.size)}</span>
-                    <span class="remove" onclick="removeFile(${index})">✕</span>
-                `;
-          fileList.appendChild(div);
+        // Code files upload - Click handler
+        codeUploadArea.addEventListener('click', () => {
+          codeFileInput.click();
         });
-      }
 
-      function removeFile(index) {
-        selectedFiles.splice(index, 1);
-        renderFileList();
-        updateBuildButton();
-      }
+        // Code files upload - Drag & Drop
+        codeUploadArea.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          codeUploadArea.classList.add('dragover');
+        });
+        codeUploadArea.addEventListener('dragleave', () => {
+          codeUploadArea.classList.remove('dragover');
+        });
+        codeUploadArea.addEventListener('drop', (e) => {
+          e.preventDefault();
+          codeUploadArea.classList.remove('dragover');
+          handleCodeFiles(e.dataTransfer.files);
+        });
 
-      function updateBuildButton() {
-        const hasPlatformioIni = selectedFiles.some(
-          (f) => f.name === 'platformio.ini',
-        );
-        const hasMainFile = selectedFiles.some(
-          (f) => f.name.endsWith('.ino') || f.name.endsWith('.cpp'),
-        );
+        // Code files upload - File input change
+        codeFileInput.addEventListener('change', (e) => {
+          handleCodeFiles(e.target.files);
+          // Reset input to allow re-selecting same files
+          e.target.value = '';
+        });
 
-        buildBtn.disabled = !(
-          hasPlatformioIni &&
-          hasMainFile &&
-          selectedFiles.length > 0
-        );
-      }
+        // Config file upload - Click handler
+        configUploadArea.addEventListener('click', () => {
+          configFileInput.click();
+        });
 
-      function formatBytes(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return (
-          Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
-        );
-      }
+        // Config file upload - Drag & Drop
+        configUploadArea.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          configUploadArea.classList.add('dragover');
+        });
+        configUploadArea.addEventListener('dragleave', () => {
+          configUploadArea.classList.remove('dragover');
+        });
+        configUploadArea.addEventListener('drop', (e) => {
+          e.preventDefault();
+          configUploadArea.classList.remove('dragover');
+          handleConfigFile(e.dataTransfer.files);
+        });
 
-      function showStatus(message, type) {
-        statusDiv.className = `status ${type}`;
-        statusDiv.textContent = message;
-        statusDiv.style.display = 'block';
-      }
+        // Config file upload - File input change
+        configFileInput.addEventListener('change', (e) => {
+          handleConfigFile(e.target.files);
+          // Reset input to allow re-selecting same files
+          e.target.value = '';
+        });
 
-      function hideStatus() {
-        statusDiv.style.display = 'none';
-      }
+        // ============================================
+        // FILE HANDLING FUNCTIONS
+        // ============================================
 
-      /**
-       * Reset UI to initial state
-       */
-      function resetBuildUI() {
-        buildBtn.disabled = false;
-        buildBtn.textContent = 'Build Firmware';
-        cancelBtn.style.display = 'none';
-        progressDiv.style.display = 'none';
-        progressBar.style.width = '0%';
-        progressBar.textContent = '';
-        buildPhase.textContent = 'Initializing...';
-        buildPercent.textContent = '0%';
-        updateBuildButton();
-      }
+        function handleCodeFiles(files) {
+          const validFiles = Array.from(files).filter(
+            (f) => f.name.endsWith('.ino') || f.name.endsWith('.cpp') || f.name.endsWith('.h'),
+          );
 
-      /**
-       * Update progress bar and phase display
-       */
-      function updateProgress(percent, stage, message) {
-        progressBar.style.width = `${percent}%`;
-        progressBar.textContent = `${Math.round(percent)}%`;
-        buildPhase.textContent = message || stage || 'Building...';
-        buildPercent.textContent = `${Math.round(percent)}%`;
-      }
+          if (validFiles.length === 0) {
+            showStatus('Please select valid code files (.ino, .cpp, .h)', 'error');
+            return;
+          }
 
-      /**
-       * Append log line to build log display
-       */
-      function appendLog(message, level = 'info') {
-        buildLogDiv.style.display = 'block';
-        const logLine = document.createElement('div');
-        logLine.className = `log-${level}`;
-        logLine.textContent = message;
-        buildLogDiv.appendChild(logLine);
-        // Auto-scroll to bottom
-        buildLogDiv.scrollTop = buildLogDiv.scrollHeight;
-      }
+          codeFiles = validFiles;
 
-      /**
-       * Clear build log
-       */
-      function clearBuildLog() {
-        buildLogDiv.innerHTML = '';
-        buildLogDiv.style.display = 'none';
-      }
-
-      /**
-       * Connect to SSE stream for build updates
-       */
-      function connectToSSEStream(buildId) {
-        // Close existing connection if any
-        if (currentEventSource) {
-          currentEventSource.close();
+          renderCodeFileList();
+          updateStepIndicators();
+          updateBuildButton();
         }
 
-        currentBuildId = buildId;
-        const url = `/api/firmware/build/${buildId}/stream`;
+        function handleConfigFile(files) {
+          const file = Array.from(files).find((f) => f.name === 'platformio.ini');
 
-        currentEventSource = new EventSource(url);
+          if (!file) {
+            showStatus('Please select platformio.ini file', 'error');
+            return;
+          }
 
-        // Event: build_started
-        currentEventSource.addEventListener('build_started', (e) => {
-          const data = JSON.parse(e.data);
+          configFile = file;
 
-          buildStartTime = new Date();
-          showStatus(`Build started: ${data.buildId}`, 'info');
-          progressDiv.style.display = 'block';
-          updateProgress(0, 'initializing', 'Build started...');
-        });
+          renderConfigFile();
+          updateStepIndicators();
+          updateBuildButton();
+        }
 
-        // Event: progress
-        currentEventSource.addEventListener('progress', (e) => {
-          const data = JSON.parse(e.data);
+        function renderCodeFileList() {
+          if (codeFiles.length === 0) {
+            codeFileList.innerHTML = '';
+            codeFileBadge.classList.add('hidden');
+            return;
+          }
 
-          const stageLabels = {
-            initializing: 'Initializing build environment',
-            validating: 'Validating source files',
-            compiling: 'Compiling source code',
-            linking: 'Linking binary',
-            packaging: 'Packaging firmware',
-            finalizing: 'Finalizing build'
+          codeFileBadge.classList.remove('hidden');
+          codeFileBadge.textContent = `${codeFiles.length} file${codeFiles.length > 1 ? 's' : ''}`;
+          codeFileBadge.className =
+            'text-xs px-2.5 py-1 rounded-full bg-primary/15 text-primary font-medium';
+
+          codeFileList.innerHTML = codeFiles
+            .map(
+              (file, index) => `
+            <div class="flex items-center justify-between p-3 rounded-md border bg-accent/50">
+              <div class="flex items-center gap-2 flex-1 min-w-0">
+                <i data-lucide="file-code" class="h-4 w-4 text-primary flex-shrink-0"></i>
+                <span class="text-sm font-mono truncate">${file.name}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-muted-foreground">${formatBytes(file.size)}</span>
+                <button
+                  onclick="window.removeCodeFile(${index})"
+                  class="inline-flex items-center justify-center rounded-sm text-xs hover:bg-destructive hover:text-destructive-foreground h-6 w-6"
+                >
+                  <i data-lucide="x" class="h-3 w-3"></i>
+                </button>
+              </div>
+            </div>
+          `,
+            )
+            .join('');
+
+          lucide.createIcons();
+        }
+
+        function renderConfigFile() {
+          if (!configFile) {
+            configFileDisplay.innerHTML = '';
+            configFileBadge.textContent = 'Not uploaded';
+            configFileBadge.className =
+              'text-xs px-2.5 py-1 rounded-full bg-muted text-muted-foreground font-medium';
+            return;
+          }
+
+          configFileBadge.textContent = 'Uploaded';
+          configFileBadge.className =
+            'text-xs px-2.5 py-1 rounded-full bg-primary/15 text-primary font-medium';
+
+          configFileDisplay.innerHTML = `
+            <div class="flex items-center justify-between p-3 rounded-md border bg-accent/50">
+              <div class="flex items-center gap-2 flex-1 min-w-0">
+                <i data-lucide="file-cog" class="h-4 w-4 text-primary flex-shrink-0"></i>
+                <span class="text-sm font-mono truncate">${configFile.name}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-muted-foreground">${formatBytes(configFile.size)}</span>
+                <button
+                  onclick="window.removeConfigFile()"
+                  class="inline-flex items-center justify-center rounded-sm text-xs hover:bg-destructive hover:text-destructive-foreground h-6 w-6"
+                >
+                  <i data-lucide="x" class="h-3 w-3"></i>
+                </button>
+              </div>
+            </div>
+          `;
+
+          lucide.createIcons();
+        }
+
+        function removeCodeFile(index) {
+          codeFiles.splice(index, 1);
+          renderCodeFileList();
+          updateStepIndicators();
+          updateBuildButton();
+        }
+
+        function removeConfigFile() {
+          configFile = null;
+          renderConfigFile();
+          updateStepIndicators();
+          updateBuildButton();
+        }
+
+        // Expose remove functions to global scope for onclick handlers
+        window.removeCodeFile = removeCodeFile;
+        window.removeConfigFile = removeConfigFile;
+
+        function updateStepIndicators() {
+          const hasCodeFiles = codeFiles.length > 0;
+          const hasConfigFile = configFile !== null;
+          const allFilesReady = hasCodeFiles && hasConfigFile;
+
+          // Update Upload Card appearance
+          if (allFilesReady) {
+            uploadCard.classList.add('upload-card-ready');
+          } else {
+            uploadCard.classList.remove('upload-card-ready');
+          }
+
+          // Update requirements checklist
+          if (hasCodeFiles) {
+            const icon1 = req1.querySelector('svg') || req1.querySelector('i');
+            if (icon1) {
+              icon1.setAttribute('data-lucide', 'check-circle');
+              icon1.classList.add('text-primary');
+            }
+          } else {
+            const icon1 = req1.querySelector('svg') || req1.querySelector('i');
+            if (icon1) {
+              icon1.setAttribute('data-lucide', 'circle');
+              icon1.classList.remove('text-primary');
+            }
+          }
+
+          if (hasConfigFile) {
+            const icon2 = req2.querySelector('svg') || req2.querySelector('i');
+            if (icon2) {
+              icon2.setAttribute('data-lucide', 'check-circle');
+              icon2.classList.add('text-primary');
+            }
+          } else {
+            const icon2 = req2.querySelector('svg') || req2.querySelector('i');
+            if (icon2) {
+              icon2.setAttribute('data-lucide', 'circle');
+              icon2.classList.remove('text-primary');
+            }
+          }
+
+          // Update Stepper - Upload Step
+          if (allFilesReady) {
+            stepperUpload.classList.remove('pending');
+            stepperUpload.classList.add('completed');
+            stepperUpload.querySelector('.step-number').classList.add('hidden');
+            stepperUpload.querySelector('.step-check').classList.remove('hidden');
+          } else {
+            stepperUpload.classList.remove('completed', 'active');
+            stepperUpload.classList.add('pending');
+            stepperUpload.querySelector('.step-number').classList.remove('hidden');
+            stepperUpload.querySelector('.step-check').classList.add('hidden');
+          }
+
+          // Update Build Status Badge
+          if (allFilesReady) {
+            buildStatusBadge.textContent = 'Ready';
+            buildStatusBadge.className =
+              'text-sm px-3 py-1.5 rounded-full bg-green-500/15 text-green-600 dark:text-green-400 font-medium';
+          } else {
+            buildStatusBadge.textContent = 'Waiting';
+            buildStatusBadge.className =
+              'text-sm px-3 py-1.5 rounded-full bg-muted text-muted-foreground font-medium';
+          }
+
+          lucide.createIcons();
+        }
+
+        function updateBuildButton() {
+          const hasCodeFiles = codeFiles.length > 0;
+          const hasConfigFile = configFile !== null;
+          const shouldEnable = hasCodeFiles && hasConfigFile;
+
+          buildBtn.disabled = !shouldEnable;
+
+          if (!buildBtn.disabled) {
+            buildBtn.classList.add('build-btn-ready');
+          } else {
+            buildBtn.classList.remove('build-btn-ready');
+          }
+        }
+
+        function formatBytes(bytes) {
+          if (bytes === 0) return '0 Bytes';
+          const k = 1024;
+          const sizes = ['Bytes', 'KB', 'MB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function showStatus(message, type) {
+          const icons = {
+            success: 'check-circle',
+            error: 'alert-circle',
+            info: 'info',
+            warning: 'alert-triangle',
           };
 
-          const message = data.message || stageLabels[data.stage] || data.stage;
-          updateProgress(data.percent, data.stage, message);
+          const classes = {
+            success: 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400',
+            error: 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400',
+            info: 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400',
+            warning: 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400',
+          };
 
-          if (data.currentFile) {
-            appendLog(`Processing: ${data.currentFile}`, 'debug');
+          // Preserve spacing and animation classes while updating notification styling
+          statusMessage.className = `mb-4 animate-fade-in flex items-start gap-3 p-4 rounded-lg border ${classes[type]}`;
+          statusMessage.innerHTML = `
+            <i data-lucide="${icons[type]}" class="h-5 w-5 flex-shrink-0 mt-0.5"></i>
+            <div class="flex-1 text-sm">${message}</div>
+          `;
+          statusMessage.classList.remove('hidden');
+          lucide.createIcons();
+
+          // Scroll to status message
+          statusMessage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function hideStatus() {
+          statusMessage.classList.add('hidden');
+        }
+
+        function resetBuildUI() {
+          buildBtn.disabled = false;
+          buildBtn.innerHTML = '<i data-lucide="play" class="mr-2 h-4 w-4"></i>Build Firmware';
+          cancelBtn.classList.add('hidden');
+          buildProgressSection.classList.add('hidden');
+          progressBar.style.width = '0%';
+          buildPhase.textContent = 'Initializing...';
+          buildPercent.textContent = '0%';
+          updateBuildButton();
+          updateStepIndicators();
+          lucide.createIcons();
+        }
+
+        function updateProgress(percent, stage, message) {
+          progressBar.style.width = `${percent}%`;
+          buildPhase.textContent = message || stage || 'Building...';
+          buildPercent.textContent = `${Math.round(percent)}%`;
+        }
+
+        function appendLog(message, level = 'info') {
+          const logLine = document.createElement('div');
+          logLine.className = `log-${level}`;
+          logLine.textContent = message;
+          buildLog.appendChild(logLine);
+          buildLog.scrollTop = buildLog.scrollHeight;
+        }
+
+        function clearBuildLog() {
+          buildLog.innerHTML = '';
+        }
+
+        clearLogBtn.addEventListener('click', clearBuildLog);
+
+        function connectToSSEStream(buildId) {
+          if (currentEventSource) {
+            currentEventSource.close();
           }
-        });
 
-        // Event: log
-        currentEventSource.addEventListener('log', (e) => {
-          const data = JSON.parse(e.data);
+          currentBuildId = buildId;
+          const url = `/api/firmware/build/${buildId}/stream`;
+          currentEventSource = new EventSource(url);
 
-          appendLog(data.message, data.level);
-        });
-
-        // Event: build_complete
-        currentEventSource.addEventListener('build_complete', (e) => {
-          const data = JSON.parse(e.data);
-
-          const duration = buildStartTime
-            ? Math.round((new Date() - buildStartTime) / 1000)
-            : Math.round(data.duration / 1000);
-
-          if (data.success) {
-            updateProgress(100, 'complete', 'Build completed successfully!');
-
-            const firmwareUrl = data.firmwareUrl || `/api/ota/download/${buildId}`;
-            const sizeStr = data.size ? formatBytes(data.size) : 'Unknown size';
-
-            showStatus(
-              `✅ Build successful! Firmware ID: ${buildId} (${sizeStr}, ${duration}s)`,
-              'success'
-            );
-
-            appendLog(`\n=== Build completed in ${duration}s ===`, 'info');
-            appendLog(`Firmware URL: ${firmwareUrl}`, 'info');
-            appendLog(`Size: ${sizeStr}`, 'info');
-
-            if (data.md5) {
-              appendLog(`MD5: ${data.md5}`, 'info');
-            }
-
-            // Add download button
-            const downloadBtn = document.createElement('a');
-            downloadBtn.href = firmwareUrl;
-            downloadBtn.className = 'btn btn-small btn-download';
-            downloadBtn.textContent = '⬇️ Download Firmware';
-            downloadBtn.style.marginTop = '10px';
-            downloadBtn.style.display = 'inline-block';
-            statusDiv.appendChild(downloadBtn);
-
-            loadFirmwares();
-
-            // Clear selected files
-            selectedFiles = [];
-            renderFileList();
-          } else {
-            updateProgress(100, 'failed', 'Build failed');
-            showStatus(`❌ Build failed after ${duration}s`, 'error');
-            appendLog('\n=== Build failed ===', 'error');
-          }
-
-          closeSSEConnection();
-          resetBuildUI();
-        });
-
-        // Event: error
-        currentEventSource.addEventListener('error', (e) => {
-          // Check if event has data (actual error event from server)
-          if (e.data) {
+          currentEventSource.addEventListener('build_started', (e) => {
             const data = JSON.parse(e.data);
+            buildStartTime = new Date();
+            showStatus(`Build started: ${data.buildId}`, 'info');
+            buildProgressSection.classList.remove('hidden');
+            buildLogContainer.classList.remove('hidden');
+            updateProgress(0, 'initializing', 'Build started...');
 
-            showStatus(`❌ Build failed: ${data.message}`, 'error');
-            appendLog(`\nERROR: ${data.message}`, 'error');
+            // Update stepper - Build step active
+            stepperBuild.classList.remove('pending');
+            stepperBuild.classList.add('active');
+            stepperBuild.querySelector('.step-number').classList.add('hidden');
+            stepperBuild.querySelector('.step-loading').classList.remove('hidden');
 
-            if (data.details) {
-              appendLog(data.details, 'error');
+            // Update status badge
+            buildStatusBadge.textContent = 'Building...';
+            buildStatusBadge.className =
+              'text-sm px-3 py-1.5 rounded-full bg-primary/15 text-primary font-medium animate-pulse-glow';
+
+            lucide.createIcons();
+          });
+
+          currentEventSource.addEventListener('progress', (e) => {
+            const data = JSON.parse(e.data);
+            const stageLabels = {
+              initializing: 'Initializing build environment',
+              validating: 'Validating source files',
+              compiling: 'Compiling source code',
+              linking: 'Linking binary',
+              packaging: 'Packaging firmware',
+              finalizing: 'Finalizing build',
+            };
+
+            const message = data.message || stageLabels[data.stage] || data.stage;
+            updateProgress(data.percent, data.stage, message);
+
+            if (data.currentFile) {
+              appendLog(`Processing: ${data.currentFile}`, 'debug');
             }
+          });
 
-            if (data.suggestions && data.suggestions.length > 0) {
-              appendLog('\nSuggestions:', 'info');
-              data.suggestions.forEach(s => appendLog(`  - ${s}`, 'info'));
+          currentEventSource.addEventListener('log', (e) => {
+            const data = JSON.parse(e.data);
+            appendLog(data.message, data.level);
+          });
+
+          currentEventSource.addEventListener('build_complete', (e) => {
+            const data = JSON.parse(e.data);
+            const duration = buildStartTime
+              ? Math.round((new Date() - buildStartTime) / 1000)
+              : Math.round(data.duration / 1000);
+
+            if (data.success) {
+              updateProgress(100, 'complete', 'Build completed successfully!');
+              const firmwareUrl = `/api/ota/download/${buildId}`;
+              const sizeStr = data.size ? formatBytes(data.size) : 'Unknown size';
+
+              showStatus(
+                `Build successful! Firmware ID: ${buildId} (${sizeStr}, ${duration}s) - <a href="${firmwareUrl}" class="underline font-semibold hover:no-underline">Download</a>`,
+                'success',
+              );
+
+              appendLog(`\n=== Build completed in ${duration}s ===`, 'info');
+              appendLog(`Firmware URL: ${firmwareUrl}`, 'info');
+              appendLog(`Size: ${sizeStr}`, 'info');
+
+              if (data.md5) {
+                appendLog(`MD5: ${data.md5}`, 'info');
+              }
+
+              // Update stepper - Complete
+              stepperBuild.classList.remove('active');
+              stepperBuild.classList.add('completed');
+              stepperBuild.querySelector('.step-loading').classList.add('hidden');
+              stepperBuild.querySelector('.step-check').classList.remove('hidden');
+
+              stepperComplete.classList.remove('pending');
+              stepperComplete.classList.add('completed');
+              stepperComplete.querySelector('.step-number').classList.add('hidden');
+              stepperComplete.querySelector('.step-check').classList.remove('hidden');
+
+              // Update status badge
+              buildStatusBadge.textContent = 'Completed';
+              buildStatusBadge.className =
+                'text-sm px-3 py-1.5 rounded-full bg-green-500/15 text-green-600 dark:text-green-400 font-medium';
+
+              loadFirmwares();
+
+              // Reset UI after 3 seconds to allow user to see success state
+              setTimeout(() => {
+                // Clear files and reset UI
+                codeFiles = [];
+                configFile = null;
+                renderCodeFileList();
+                renderConfigFile();
+                updateStepIndicators();
+                updateBuildButton();
+
+                // Reset stepper to initial state
+                stepperUpload.classList.remove('completed');
+                stepperUpload.classList.add('pending');
+                stepperUpload.querySelector('.step-number').classList.remove('hidden');
+                stepperUpload.querySelector('.step-check').classList.add('hidden');
+
+                stepperBuild.classList.remove('completed');
+                stepperBuild.classList.add('pending');
+                stepperBuild.querySelector('.step-number').classList.remove('hidden');
+                stepperBuild.querySelector('.step-check').classList.add('hidden');
+                stepperBuild.querySelector('.stepper-circle').style.backgroundColor = '';
+                stepperBuild.querySelector('.stepper-circle').style.color = '';
+                stepperBuild.querySelector('.stepper-circle').style.borderColor = '';
+
+                stepperComplete.classList.remove('completed');
+                stepperComplete.classList.add('pending');
+                stepperComplete.querySelector('.step-number').classList.remove('hidden');
+                stepperComplete.querySelector('.step-check').classList.add('hidden');
+
+                buildStatusBadge.textContent = 'Waiting';
+                buildStatusBadge.className =
+                  'text-sm px-3 py-1.5 rounded-full bg-muted text-muted-foreground font-medium';
+
+                lucide.createIcons();
+              }, 3000); // Reset after 3 seconds
+            } else {
+              updateProgress(100, 'failed', 'Build failed');
+              showStatus(`Build failed after ${duration}s`, 'error');
+              appendLog('\n=== Build failed ===', 'error');
+
+              // Update stepper - Failed
+              stepperBuild.classList.remove('active');
+              stepperBuild.querySelector('.step-loading').classList.add('hidden');
+              stepperBuild.querySelector('.step-number').classList.remove('hidden');
+              stepperBuild.querySelector('.stepper-circle').style.backgroundColor =
+                'hsl(var(--destructive) / 0.15)';
+              stepperBuild.querySelector('.stepper-circle').style.color = 'hsl(var(--destructive))';
+              stepperBuild.querySelector('.stepper-circle').style.borderColor =
+                'hsl(var(--destructive))';
+
+              // Update status badge
+              buildStatusBadge.textContent = 'Failed';
+              buildStatusBadge.className =
+                'text-sm px-3 py-1.5 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 font-medium';
             }
 
             closeSSEConnection();
             resetBuildUI();
-          }
-        });
+            lucide.createIcons();
+          });
 
-        // Event: build_cancelled
-        currentEventSource.addEventListener('build_cancelled', (e) => {
-          const data = JSON.parse(e.data);
+          currentEventSource.addEventListener('error', (e) => {
+            if (e.data) {
+              const data = JSON.parse(e.data);
+              showStatus(`Build failed: ${data.message}`, 'error');
+              appendLog(`\nERROR: ${data.message}`, 'error');
 
-          showStatus(`⚠️ Build cancelled: ${data.reason}`, 'info');
-          appendLog(`\nBuild cancelled: ${data.message || data.reason}`, 'warning');
+              if (data.details) {
+                appendLog(data.details, 'error');
+              }
 
-          closeSSEConnection();
-          resetBuildUI();
-        });
+              if (data.suggestions && data.suggestions.length > 0) {
+                appendLog('\nSuggestions:', 'info');
+                data.suggestions.forEach((s) => appendLog(`  - ${s}`, 'info'));
+              }
 
-        // Event: heartbeat (keep-alive)
-        currentEventSource.addEventListener('heartbeat', (e) => {
-          const data = JSON.parse(e.data);
-        });
+              closeSSEConnection();
+              resetBuildUI();
+            }
+          });
 
-        // Connection error handler
-        currentEventSource.onerror = (error) => {
-          // EventSource automatically reconnects, but if build is complete,
-          // we should close the connection
-          if (currentEventSource.readyState === EventSource.CLOSED) {
-            showStatus('⚠️ Connection lost. Please refresh and try again.', 'error');
+          currentEventSource.addEventListener('build_cancelled', (e) => {
+            const data = JSON.parse(e.data);
+            showStatus(`Build cancelled: ${data.reason}`, 'warning');
+            appendLog(`\nBuild cancelled: ${data.message || data.reason}`, 'warning');
             closeSSEConnection();
             resetBuildUI();
-          }
-        };
-      }
-
-      /**
-       * Close SSE connection
-       */
-      function closeSSEConnection() {
-        if (currentEventSource) {
-          currentEventSource.close();
-          currentEventSource = null;
-        }
-        currentBuildId = null;
-      }
-
-      /**
-       * Cancel current build
-       */
-      async function cancelBuild() {
-        if (!currentBuildId) return;
-
-        if (!confirm('Are you sure you want to cancel this build?')) {
-          return;
-        }
-
-        try {
-          cancelBtn.disabled = true;
-          cancelBtn.textContent = 'Cancelling...';
-
-          const response = await fetch(`/api/firmware/build/${currentBuildId}/cancel`, {
-            method: 'DELETE'
           });
 
-          if (response.ok) {
-            appendLog('\nCancelling build...', 'warning');
-            // The build_cancelled event will handle UI cleanup
-          } else {
-            showStatus('❌ Failed to cancel build', 'error');
-            cancelBtn.disabled = false;
-            cancelBtn.textContent = 'Cancel Build';
-          }
-        } catch (error) {
-          showStatus(`❌ Error cancelling build: ${error.message}`, 'error');
-          cancelBtn.disabled = false;
-          cancelBtn.textContent = 'Cancel Build';
-        }
-      }
-
-      /**
-       * Build firmware with SSE streaming
-       */
-      buildBtn.addEventListener('click', async () => {
-        if (selectedFiles.length === 0) return;
-
-        // Disable build button and show loading state
-        buildBtn.disabled = true;
-        buildBtn.innerHTML = '<span class="loading"></span> Uploading...';
-        cancelBtn.style.display = 'none';
-
-        // Reset UI
-        hideStatus();
-        clearBuildLog();
-        progressDiv.style.display = 'none';
-
-        // Prepare form data
-        const formData = new FormData();
-        selectedFiles.forEach((file) => {
-          formData.append('files', file);
-        });
-
-        try {
-          // Step 1: Upload files and get buildId
-          appendLog('Uploading source files...', 'info');
-
-          const uploadResponse = await fetch('/api/firmware/build/init', {
-            method: 'POST',
-            body: formData,
+          currentEventSource.addEventListener('heartbeat', (e) => {
+            const data = JSON.parse(e.data);
           });
 
-          if (!uploadResponse.ok) {
-            const errorText = await uploadResponse.text();
-            throw new Error(`Upload failed: ${errorText}`);
-          }
-
-          const uploadResult = await uploadResponse.json();
-
-          if (!uploadResult.success) {
-            throw new Error(uploadResult.message || 'Upload failed');
-          }
-
-          const buildId = uploadResult.data.build_id;
-          appendLog(`Build ID: ${buildId}`, 'info');
-          appendLog('Files uploaded successfully', 'info');
-
-          // Update UI for active build
-          buildBtn.innerHTML = '<span class="loading"></span> Building...';
-          cancelBtn.style.display = 'inline-block';
-          cancelBtn.disabled = false;
-          progressDiv.style.display = 'block';
-
-          // Step 2: Connect to SSE stream
-          appendLog('Connecting to build stream...', 'info');
-          connectToSSEStream(buildId);
-
-        } catch (error) {
-          showStatus(`❌ Error: ${error.message}`, 'error');
-          appendLog(`ERROR: ${error.message}`, 'error');
-          resetBuildUI();
+          currentEventSource.onerror = (error) => {
+            if (currentEventSource.readyState === EventSource.CLOSED) {
+              showStatus('Connection lost. Please refresh and try again.', 'error');
+              closeSSEConnection();
+              resetBuildUI();
+            }
+          };
         }
-      });
 
-      async function loadFirmwares() {
-        const firmwareListDiv = document.getElementById('firmwareList');
-        firmwareListDiv.innerHTML = '<p style="color: #999;">Loading...</p>';
+        function closeSSEConnection() {
+          if (currentEventSource) {
+            currentEventSource.close();
+            currentEventSource = null;
+          }
+          currentBuildId = null;
+        }
 
-        try {
-          const response = await fetch('/api/firmware');
-          const result = await response.json();
+        async function cancelBuild() {
+          if (!currentBuildId) return;
 
-          if (result.success && result.data.length > 0) {
-            firmwareListDiv.innerHTML = '';
+          if (!confirm('Are you sure you want to cancel this build?')) {
+            return;
+          }
 
-            result.data.forEach((firmware) => {
-              const div = document.createElement('div');
-              div.className = 'firmware-item';
+          try {
+            cancelBtn.disabled = true;
+            cancelBtn.innerHTML =
+              '<i data-lucide="loader" class="mr-2 h-4 w-4 animate-spin"></i>Cancelling...';
+            lucide.createIcons();
 
-              const date = new Date(firmware.created).toLocaleString();
-
-              div.innerHTML = `
-                            <div class="firmware-info">
-                                <div class="firmware-id">${firmware.buildId}</div>
-                                <div class="firmware-meta">
-                                    📦 ${formatBytes(firmware.size)} | 📅 ${date}
-                                </div>
-                            </div>
-                            <div class="firmware-actions">
-                                <button class="btn btn-small btn-download" onclick="downloadFirmware('${firmware.buildId}')">
-                                    ⬇️ Download
-                                </button>
-                                <button class="btn btn-small btn-delete" onclick="deleteFirmware('${firmware.buildId}')">
-                                    🗑️ Delete
-                                </button>
-                            </div>
-                        `;
-
-              firmwareListDiv.appendChild(div);
+            const response = await fetch(`/api/firmware/build/${currentBuildId}/cancel`, {
+              method: 'DELETE',
             });
-          } else {
-            firmwareListDiv.innerHTML =
-              '<p style="color: #999;">No firmwares available yet. Build one!</p>';
+
+            if (response.ok) {
+              appendLog('\nCancelling build...', 'warning');
+            } else {
+              showStatus('Failed to cancel build', 'error');
+              cancelBtn.disabled = false;
+              cancelBtn.innerHTML =
+                '<i data-lucide="x-circle" class="mr-2 h-4 w-4"></i>Cancel Build';
+              lucide.createIcons();
+            }
+          } catch (error) {
+            showStatus(`Error cancelling build: ${error.message}`, 'error');
+            cancelBtn.disabled = false;
+            cancelBtn.innerHTML = '<i data-lucide="x-circle" class="mr-2 h-4 w-4"></i>Cancel Build';
+            lucide.createIcons();
           }
-        } catch (error) {
-          firmwareListDiv.innerHTML = `<p style="color: #dc3545;">Error loading firmwares: ${error.message}</p>`;
         }
-      }
 
-      function downloadFirmware(buildId) {
-        window.open(`/api/ota/download/${buildId}`, '_blank');
-      }
+        cancelBtn.addEventListener('click', cancelBuild);
 
-      async function deleteFirmware(buildId) {
-        if (!confirm(`Delete firmware ${buildId}?`)) return;
+        buildBtn.addEventListener('click', async () => {
+          if (codeFiles.length === 0 || !configFile) return;
 
-        try {
-          const response = await fetch(`/api/firmware/${buildId}`, {
-            method: 'DELETE',
+          buildBtn.disabled = true;
+          buildBtn.innerHTML =
+            '<i data-lucide="loader" class="mr-2 h-4 w-4 animate-spin"></i>Uploading...';
+          buildBtn.classList.remove('build-btn-ready');
+          cancelBtn.classList.add('hidden');
+          lucide.createIcons();
+
+          hideStatus();
+          clearBuildLog();
+          buildProgressSection.classList.add('hidden');
+          buildLogContainer.classList.add('hidden');
+
+          const formData = new FormData();
+          codeFiles.forEach((file) => {
+            formData.append('files', file);
           });
+          formData.append('files', configFile);
 
-          if (response.ok) {
-            loadFirmwares();
-          } else {
-            alert('Failed to delete firmware');
+          try {
+            appendLog('Uploading source files...', 'info');
+            buildProgressSection.classList.remove('hidden');
+            buildLogContainer.classList.remove('hidden');
+
+            const uploadResponse = await fetch('/api/firmware/build/init', {
+              method: 'POST',
+              body: formData,
+            });
+
+            if (!uploadResponse.ok) {
+              const errorText = await uploadResponse.text();
+              throw new Error(`Upload failed: ${errorText}`);
+            }
+
+            const uploadResult = await uploadResponse.json();
+
+            if (!uploadResult.success) {
+              throw new Error(uploadResult.message || 'Upload failed');
+            }
+
+            const buildId = uploadResult.data.build_id;
+            appendLog(`Build ID: ${buildId}`, 'info');
+            appendLog('Files uploaded successfully', 'info');
+
+            buildBtn.innerHTML =
+              '<i data-lucide="loader" class="mr-2 h-4 w-4 animate-spin"></i>Building...';
+            cancelBtn.classList.remove('hidden');
+            cancelBtn.disabled = false;
+            lucide.createIcons();
+
+            appendLog('Connecting to build stream...', 'info');
+            connectToSSEStream(buildId);
+          } catch (error) {
+            showStatus(`Error: ${error.message}`, 'error');
+            appendLog(`ERROR: ${error.message}`, 'error');
+            resetBuildUI();
           }
-        } catch (error) {
-          alert('Error: ' + error.message);
+        });
+
+        async function loadFirmwares() {
+          firmwareList.innerHTML =
+            '<div class="flex items-center justify-center py-4"><i data-lucide="loader" class="h-5 w-5 text-muted-foreground animate-spin"></i><span class="ml-2 text-sm text-muted-foreground">Loading...</span></div>';
+          lucide.createIcons();
+
+          try {
+            const response = await fetch('/api/firmware');
+            const result = await response.json();
+
+            if (result.success && result.data.length > 0) {
+              firmwareList.innerHTML = result.data
+                .map((firmware) => {
+                  const date = new Date(firmware.created).toLocaleString();
+                  return `
+                  <div class="flex items-center justify-between p-4 rounded-lg border bg-accent/50 hover:bg-accent transition-colors group">
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2 mb-1">
+                        <i data-lucide="cpu" class="h-4 w-4 text-primary flex-shrink-0"></i>
+                        <span class="font-mono text-sm font-medium truncate">${firmware.buildId}</span>
+                      </div>
+                      <div class="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span class="flex items-center gap-1">
+                          <i data-lucide="hard-drive" class="h-3 w-3"></i>
+                          ${formatBytes(firmware.size)}
+                        </span>
+                        <span class="flex items-center gap-1">
+                          <i data-lucide="calendar" class="h-3 w-3"></i>
+                          ${date}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-2 ml-4">
+                      <button
+                        onclick="downloadFirmware('${firmware.buildId}')"
+                        class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-3"
+                        title="Download firmware"
+                      >
+                        <i data-lucide="download" class="h-4 w-4"></i>
+                      </button>
+                      <button
+                        onclick="deleteFirmware('${firmware.buildId}')"
+                        class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-destructive text-destructive-foreground hover:bg-destructive/90 h-9 px-3"
+                        title="Delete firmware"
+                      >
+                        <i data-lucide="trash-2" class="h-4 w-4"></i>
+                      </button>
+                    </div>
+                  </div>
+                `;
+                })
+                .join('');
+              lucide.createIcons();
+            } else {
+              firmwareList.innerHTML = `
+                <div class="text-center py-12">
+                  <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted mb-4">
+                    <i data-lucide="package-open" class="h-8 w-8 text-muted-foreground"></i>
+                  </div>
+                  <p class="text-sm text-muted-foreground mb-1">No firmwares available yet</p>
+                  <p class="text-xs text-muted-foreground">Build one to get started!</p>
+                </div>
+              `;
+              lucide.createIcons();
+            }
+          } catch (error) {
+            firmwareList.innerHTML = `<p class="text-sm text-destructive text-center py-4">Error loading firmwares: ${error.message}</p>`;
+          }
         }
-      }
-      loadFirmwares();
+
+        function downloadFirmware(buildId) {
+          window.open(`/api/ota/download/${buildId}`, '_blank');
+        }
+
+        async function deleteFirmware(buildId) {
+          if (!confirm(`Delete firmware ${buildId}?`)) return;
+
+          try {
+            const response = await fetch(`/api/firmware/${buildId}`, {
+              method: 'DELETE',
+            });
+
+            if (response.ok) {
+              loadFirmwares();
+              showStatus(`Firmware ${buildId} deleted successfully`, 'success');
+            } else {
+              showStatus('Failed to delete firmware', 'error');
+            }
+          } catch (error) {
+            showStatus(`Error: ${error.message}`, 'error');
+          }
+        }
+
+        refreshFirmwaresBtn.addEventListener('click', loadFirmwares);
+
+        window.downloadFirmware = downloadFirmware;
+        window.deleteFirmware = deleteFirmware;
+
+        updateStepIndicators();
+        updateBuildButton();
+        loadFirmwares();
+      });
     </script>
   </body>
 </html>
