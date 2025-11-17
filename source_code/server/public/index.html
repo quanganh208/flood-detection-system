@@ -248,6 +248,124 @@
         word-wrap: break-word;
         margin-top: 15px;
       }
+
+      .build-log .log-debug {
+        color: #858585;
+      }
+
+      .build-log .log-info {
+        color: #d4d4d4;
+      }
+
+      .build-log .log-warning {
+        color: #ffa500;
+      }
+
+      .build-log .log-error {
+        color: #f44336;
+        font-weight: bold;
+      }
+
+      #build-progress {
+        margin: 15px 0;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        border: 1px solid #dee2e6;
+      }
+
+      .progress-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        font-weight: 600;
+        color: #333;
+      }
+
+      #build-phase {
+        font-size: 0.95em;
+        color: #667eea;
+      }
+
+      #build-percent {
+        font-size: 0.9em;
+        color: #666;
+      }
+
+      .progress-bar-container {
+        width: 100%;
+        height: 24px;
+        background: #e9ecef;
+        border-radius: 12px;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        width: 0%;
+        transition: width 0.3s ease;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 600;
+        font-size: 0.85em;
+      }
+
+      #cancel-btn {
+        background: #dc3545;
+        color: white;
+        margin-left: 10px;
+        display: inline-block;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 1em;
+        font-weight: 600;
+        transition: all 0.3s;
+      }
+
+      #cancel-btn:hover {
+        background: #c82333;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(220, 53, 69, 0.4);
+      }
+
+      #cancel-btn:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 10px;
+        margin-top: 20px;
+      }
+
+      .button-group .btn {
+        flex: 1;
+        margin: 0;
+      }
+
+      .build-metadata {
+        margin-top: 10px;
+        padding: 10px;
+        background: #e8f5e9;
+        border-radius: 6px;
+        font-size: 0.9em;
+        color: #2e7d32;
+      }
+
+      .build-metadata strong {
+        color: #1b5e20;
+      }
     </style>
   </head>
   <body>
@@ -277,9 +395,24 @@
 
         <div class="file-list" id="fileList"></div>
 
-        <button class="btn btn-full" id="buildBtn" disabled>
-          Build Firmware
-        </button>
+        <div class="button-group">
+          <button class="btn" id="buildBtn" disabled>
+            Build Firmware
+          </button>
+          <button id="cancel-btn" style="display: none" onclick="cancelBuild()">
+            Cancel Build
+          </button>
+        </div>
+
+        <div id="build-progress" style="display: none">
+          <div class="progress-info">
+            <span id="build-phase">Initializing...</span>
+            <span id="build-percent">0%</span>
+          </div>
+          <div class="progress-bar-container">
+            <div id="progress-bar" class="progress-bar"></div>
+          </div>
+        </div>
 
         <div class="status" id="status"></div>
         <div class="build-log" id="buildLog" style="display: none"></div>
@@ -297,13 +430,21 @@
 
     <script>
       let selectedFiles = [];
+      let currentBuildId = null;
+      let currentEventSource = null;
+      let buildStartTime = null;
 
       const uploadArea = document.getElementById('uploadArea');
       const fileInput = document.getElementById('fileInput');
       const fileList = document.getElementById('fileList');
       const buildBtn = document.getElementById('buildBtn');
+      const cancelBtn = document.getElementById('cancel-btn');
       const statusDiv = document.getElementById('status');
       const buildLogDiv = document.getElementById('buildLog');
+      const progressDiv = document.getElementById('build-progress');
+      const progressBar = document.getElementById('progress-bar');
+      const buildPhase = document.getElementById('build-phase');
+      const buildPercent = document.getElementById('build-percent');
 
       uploadArea.addEventListener('click', () => fileInput.click());
 
@@ -394,58 +535,310 @@
         statusDiv.style.display = 'none';
       }
 
+      /**
+       * Reset UI to initial state
+       */
+      function resetBuildUI() {
+        buildBtn.disabled = false;
+        buildBtn.textContent = 'Build Firmware';
+        cancelBtn.style.display = 'none';
+        progressDiv.style.display = 'none';
+        progressBar.style.width = '0%';
+        progressBar.textContent = '';
+        buildPhase.textContent = 'Initializing...';
+        buildPercent.textContent = '0%';
+        updateBuildButton();
+      }
+
+      /**
+       * Update progress bar and phase display
+       */
+      function updateProgress(percent, stage, message) {
+        progressBar.style.width = `${percent}%`;
+        progressBar.textContent = `${Math.round(percent)}%`;
+        buildPhase.textContent = message || stage || 'Building...';
+        buildPercent.textContent = `${Math.round(percent)}%`;
+      }
+
+      /**
+       * Append log line to build log display
+       */
+      function appendLog(message, level = 'info') {
+        buildLogDiv.style.display = 'block';
+        const logLine = document.createElement('div');
+        logLine.className = `log-${level}`;
+        logLine.textContent = message;
+        buildLogDiv.appendChild(logLine);
+        // Auto-scroll to bottom
+        buildLogDiv.scrollTop = buildLogDiv.scrollHeight;
+      }
+
+      /**
+       * Clear build log
+       */
+      function clearBuildLog() {
+        buildLogDiv.innerHTML = '';
+        buildLogDiv.style.display = 'none';
+      }
+
+      /**
+       * Connect to SSE stream for build updates
+       */
+      function connectToSSEStream(buildId) {
+        // Close existing connection if any
+        if (currentEventSource) {
+          currentEventSource.close();
+        }
+
+        currentBuildId = buildId;
+        const url = `/api/firmware/build/${buildId}/stream`;
+
+        currentEventSource = new EventSource(url);
+
+        // Event: build_started
+        currentEventSource.addEventListener('build_started', (e) => {
+          const data = JSON.parse(e.data);
+
+          buildStartTime = new Date();
+          showStatus(`Build started: ${data.buildId}`, 'info');
+          progressDiv.style.display = 'block';
+          updateProgress(0, 'initializing', 'Build started...');
+        });
+
+        // Event: progress
+        currentEventSource.addEventListener('progress', (e) => {
+          const data = JSON.parse(e.data);
+
+          const stageLabels = {
+            initializing: 'Initializing build environment',
+            validating: 'Validating source files',
+            compiling: 'Compiling source code',
+            linking: 'Linking binary',
+            packaging: 'Packaging firmware',
+            finalizing: 'Finalizing build'
+          };
+
+          const message = data.message || stageLabels[data.stage] || data.stage;
+          updateProgress(data.percent, data.stage, message);
+
+          if (data.currentFile) {
+            appendLog(`Processing: ${data.currentFile}`, 'debug');
+          }
+        });
+
+        // Event: log
+        currentEventSource.addEventListener('log', (e) => {
+          const data = JSON.parse(e.data);
+
+          appendLog(data.message, data.level);
+        });
+
+        // Event: build_complete
+        currentEventSource.addEventListener('build_complete', (e) => {
+          const data = JSON.parse(e.data);
+
+          const duration = buildStartTime
+            ? Math.round((new Date() - buildStartTime) / 1000)
+            : Math.round(data.duration / 1000);
+
+          if (data.success) {
+            updateProgress(100, 'complete', 'Build completed successfully!');
+
+            const firmwareUrl = data.firmwareUrl || `/api/ota/download/${buildId}`;
+            const sizeStr = data.size ? formatBytes(data.size) : 'Unknown size';
+
+            showStatus(
+              `✅ Build successful! Firmware ID: ${buildId} (${sizeStr}, ${duration}s)`,
+              'success'
+            );
+
+            appendLog(`\n=== Build completed in ${duration}s ===`, 'info');
+            appendLog(`Firmware URL: ${firmwareUrl}`, 'info');
+            appendLog(`Size: ${sizeStr}`, 'info');
+
+            if (data.md5) {
+              appendLog(`MD5: ${data.md5}`, 'info');
+            }
+
+            // Add download button
+            const downloadBtn = document.createElement('a');
+            downloadBtn.href = firmwareUrl;
+            downloadBtn.className = 'btn btn-small btn-download';
+            downloadBtn.textContent = '⬇️ Download Firmware';
+            downloadBtn.style.marginTop = '10px';
+            downloadBtn.style.display = 'inline-block';
+            statusDiv.appendChild(downloadBtn);
+
+            loadFirmwares();
+
+            // Clear selected files
+            selectedFiles = [];
+            renderFileList();
+          } else {
+            updateProgress(100, 'failed', 'Build failed');
+            showStatus(`❌ Build failed after ${duration}s`, 'error');
+            appendLog('\n=== Build failed ===', 'error');
+          }
+
+          closeSSEConnection();
+          resetBuildUI();
+        });
+
+        // Event: error
+        currentEventSource.addEventListener('error', (e) => {
+          // Check if event has data (actual error event from server)
+          if (e.data) {
+            const data = JSON.parse(e.data);
+
+            showStatus(`❌ Build failed: ${data.message}`, 'error');
+            appendLog(`\nERROR: ${data.message}`, 'error');
+
+            if (data.details) {
+              appendLog(data.details, 'error');
+            }
+
+            if (data.suggestions && data.suggestions.length > 0) {
+              appendLog('\nSuggestions:', 'info');
+              data.suggestions.forEach(s => appendLog(`  - ${s}`, 'info'));
+            }
+
+            closeSSEConnection();
+            resetBuildUI();
+          }
+        });
+
+        // Event: build_cancelled
+        currentEventSource.addEventListener('build_cancelled', (e) => {
+          const data = JSON.parse(e.data);
+
+          showStatus(`⚠️ Build cancelled: ${data.reason}`, 'info');
+          appendLog(`\nBuild cancelled: ${data.message || data.reason}`, 'warning');
+
+          closeSSEConnection();
+          resetBuildUI();
+        });
+
+        // Event: heartbeat (keep-alive)
+        currentEventSource.addEventListener('heartbeat', (e) => {
+          const data = JSON.parse(e.data);
+        });
+
+        // Connection error handler
+        currentEventSource.onerror = (error) => {
+          // EventSource automatically reconnects, but if build is complete,
+          // we should close the connection
+          if (currentEventSource.readyState === EventSource.CLOSED) {
+            showStatus('⚠️ Connection lost. Please refresh and try again.', 'error');
+            closeSSEConnection();
+            resetBuildUI();
+          }
+        };
+      }
+
+      /**
+       * Close SSE connection
+       */
+      function closeSSEConnection() {
+        if (currentEventSource) {
+          currentEventSource.close();
+          currentEventSource = null;
+        }
+        currentBuildId = null;
+      }
+
+      /**
+       * Cancel current build
+       */
+      async function cancelBuild() {
+        if (!currentBuildId) return;
+
+        if (!confirm('Are you sure you want to cancel this build?')) {
+          return;
+        }
+
+        try {
+          cancelBtn.disabled = true;
+          cancelBtn.textContent = 'Cancelling...';
+
+          const response = await fetch(`/api/firmware/build/${currentBuildId}/cancel`, {
+            method: 'DELETE'
+          });
+
+          if (response.ok) {
+            appendLog('\nCancelling build...', 'warning');
+            // The build_cancelled event will handle UI cleanup
+          } else {
+            showStatus('❌ Failed to cancel build', 'error');
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel Build';
+          }
+        } catch (error) {
+          showStatus(`❌ Error cancelling build: ${error.message}`, 'error');
+          cancelBtn.disabled = false;
+          cancelBtn.textContent = 'Cancel Build';
+        }
+      }
+
+      /**
+       * Build firmware with SSE streaming
+       */
       buildBtn.addEventListener('click', async () => {
         if (selectedFiles.length === 0) return;
 
+        // Disable build button and show loading state
         buildBtn.disabled = true;
-        buildBtn.innerHTML = '<span class="loading"></span> Building...';
-        hideStatus();
-        buildLogDiv.style.display = 'none';
+        buildBtn.innerHTML = '<span class="loading"></span> Uploading...';
+        cancelBtn.style.display = 'none';
 
+        // Reset UI
+        hideStatus();
+        clearBuildLog();
+        progressDiv.style.display = 'none';
+
+        // Prepare form data
         const formData = new FormData();
         selectedFiles.forEach((file) => {
           formData.append('files', file);
         });
 
         try {
-          const response = await fetch('/api/firmware/build', {
+          // Step 1: Upload files and get buildId
+          appendLog('Uploading source files...', 'info');
+
+          const uploadResponse = await fetch('/api/firmware/build/init', {
             method: 'POST',
             body: formData,
           });
 
-          const result = await response.json();
-
-          if (response.ok && result.success) {
-            showStatus(
-              `✅ Build successful! Firmware ID: ${result.data.build_id}`,
-              'success',
-            );
-
-            if (result.data.build_log) {
-              buildLogDiv.textContent = result.data.build_log;
-              buildLogDiv.style.display = 'block';
-            }
-
-            loadFirmwares();
-
-            selectedFiles = [];
-            renderFileList();
-          } else {
-            showStatus(
-              `❌ Build failed: ${result.message || 'Unknown error'}`,
-              'error',
-            );
-            if (result.data && result.data.details) {
-              buildLogDiv.textContent = result.data.details;
-              buildLogDiv.style.display = 'block';
-            }
+          if (!uploadResponse.ok) {
+            const errorText = await uploadResponse.text();
+            throw new Error(`Upload failed: ${errorText}`);
           }
+
+          const uploadResult = await uploadResponse.json();
+
+          if (!uploadResult.success) {
+            throw new Error(uploadResult.message || 'Upload failed');
+          }
+
+          const buildId = uploadResult.data.build_id;
+          appendLog(`Build ID: ${buildId}`, 'info');
+          appendLog('Files uploaded successfully', 'info');
+
+          // Update UI for active build
+          buildBtn.innerHTML = '<span class="loading"></span> Building...';
+          cancelBtn.style.display = 'inline-block';
+          cancelBtn.disabled = false;
+          progressDiv.style.display = 'block';
+
+          // Step 2: Connect to SSE stream
+          appendLog('Connecting to build stream...', 'info');
+          connectToSSEStream(buildId);
+
         } catch (error) {
           showStatus(`❌ Error: ${error.message}`, 'error');
-        } finally {
-          buildBtn.disabled = false;
-          buildBtn.textContent = 'Build Firmware';
-          updateBuildButton();
+          appendLog(`ERROR: ${error.message}`, 'error');
+          resetBuildUI();
         }
       });
 

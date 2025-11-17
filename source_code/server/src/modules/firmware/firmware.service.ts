@@ -1,120 +1,29 @@
-import {
-  Injectable,
-  BadRequestException,
-  InternalServerErrorException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios, { AxiosError } from 'axios';
-import FormData from 'form-data';
 import * as fs from 'fs';
 import * as path from 'path';
-
-export interface BuildResponse {
-  success: boolean;
-  build_id: string;
-  firmware_url: string;
-  size: number;
-  md5: string;
-  build_log?: string;
-}
-
-interface ErrorResponse {
-  error?: string;
-}
+import { Observable } from 'rxjs';
+import { v4 as uuidv4 } from 'uuid';
+import { BuildStreamService, SseMessage } from './services/build-stream.service';
+import { BuildStateService } from './services/build-state.service';
+import { PlatformIOClientService } from './services/platformio-client.service';
+import { BuildStatus, BuildStatusResponse } from './dto/build-response.dto';
 
 @Injectable()
 export class FirmwareService {
   private readonly logger = new Logger(FirmwareService.name);
-  private readonly builderUrl: string;
   private readonly firmwareStorageDir: string;
 
-  constructor(private configService: ConfigService) {
-    this.builderUrl =
-      this.configService.get<string>('PLATFORMIO_BUILDER_URL') || 'http://platformio-builder:5000';
+  constructor(
+    private configService: ConfigService,
+    private buildStreamService: BuildStreamService,
+    private buildStateService: BuildStateService,
+    private platformIOClient: PlatformIOClientService,
+  ) {
     this.firmwareStorageDir = path.join(process.cwd(), '..', 'storage', 'firmware');
 
     if (!fs.existsSync(this.firmwareStorageDir)) {
       fs.mkdirSync(this.firmwareStorageDir, { recursive: true });
-    }
-  }
-
-  async buildFromSource(files: Express.Multer.File[]): Promise<BuildResponse> {
-    if (!files || files.length === 0) {
-      throw new BadRequestException('No files uploaded');
-    }
-
-    const hasPlatformioIni = files.some((f) => f.originalname === 'platformio.ini');
-    const hasMainFile = files.some(
-      (f) => f.originalname.endsWith('.ino') || f.originalname.endsWith('.cpp'),
-    );
-
-    if (!hasPlatformioIni) {
-      throw new BadRequestException('platformio.ini is required');
-    }
-
-    if (!hasMainFile) {
-      throw new BadRequestException('Main source file (.ino or .cpp) is required');
-    }
-
-    try {
-      const formData = new FormData();
-
-      for (const file of files) {
-        formData.append('files', file.buffer, {
-          filename: file.originalname,
-          contentType: file.mimetype,
-        });
-      }
-
-      this.logger.log(`Sending build request to ${this.builderUrl}/build`);
-
-      const response = await axios.post<BuildResponse>(`${this.builderUrl}/build`, formData, {
-        headers: formData.getHeaders(),
-        timeout: 300000,
-      });
-
-      if (response.data.success) {
-        this.logger.log(`Build successful: ${response.data.build_id}`);
-
-        await this.downloadFirmwareFromBuilder(response.data.build_id);
-
-        return response.data;
-      } else {
-        throw new InternalServerErrorException('Build failed');
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Build error: ${errorMessage}`);
-
-      if (axios.isAxiosError(error)) {
-        const axiosError = error as AxiosError<ErrorResponse>;
-        if (axiosError.response?.data) {
-          throw new InternalServerErrorException(
-            axiosError.response.data.error || 'Build service error',
-          );
-        }
-      }
-
-      throw new InternalServerErrorException('Failed to build firmware');
-    }
-  }
-
-  private async downloadFirmwareFromBuilder(buildId: string): Promise<void> {
-    try {
-      const response = await axios.get(`${this.builderUrl}/download/${buildId}`, {
-        responseType: 'arraybuffer',
-      });
-
-      const firmwarePath = path.join(this.firmwareStorageDir, `${buildId}.bin`);
-      const buffer = Buffer.from(response.data as ArrayBuffer);
-      fs.writeFileSync(firmwarePath, buffer);
-
-      this.logger.log(`Firmware saved to ${firmwarePath}`);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Failed to download firmware: ${errorMessage}`);
-      throw new InternalServerErrorException('Failed to download firmware from builder');
     }
   }
 
@@ -163,5 +72,79 @@ export class FirmwareService {
       fs.unlinkSync(firmwarePath);
       this.logger.log(`Deleted firmware: ${buildId}`);
     }
+  }
+
+  initiateBuild(files: Express.Multer.File[]): string {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('No files uploaded');
+    }
+
+    const hasPlatformioIni = files.some((f) => f.originalname === 'platformio.ini');
+    const hasMainFile = files.some(
+      (f) => f.originalname.endsWith('.ino') || f.originalname.endsWith('.cpp'),
+    );
+
+    if (!hasPlatformioIni) {
+      throw new BadRequestException('platformio.ini is required');
+    }
+
+    if (!hasMainFile) {
+      throw new BadRequestException('Main source file (.ino or .cpp) is required');
+    }
+
+    const buildId = uuidv4();
+
+    this.logger.log(`Initiating build: ${buildId} with ${files.length} files`);
+
+    this.buildStateService.setState(buildId, {
+      buildId,
+      status: BuildStatus.QUEUED,
+      percent: 0,
+      fileCount: files.length,
+      queuePosition: 0,
+    });
+
+    void this.platformIOClient.startBuild(buildId, files).catch((error: Error) => {
+      this.logger.error(`Failed to start build ${buildId}: ${error.message}`);
+    });
+
+    return buildId;
+  }
+
+  getBuildStream(buildId: string, lastEventId?: number): Observable<SseMessage> {
+    return this.buildStreamService.getBuildStream(buildId, lastEventId);
+  }
+
+  getBuildStatus(buildId: string): BuildStatusResponse {
+    const state = this.buildStateService.getState(buildId);
+
+    if (!state) {
+      throw new NotFoundException(`Build ${buildId} not found`);
+    }
+
+    return {
+      buildId: state.buildId,
+      status: state.status,
+      stage: state.stage,
+      percent: state.percent,
+      startedAt: state.startedAt?.toISOString(),
+      completedAt: state.completedAt?.toISOString(),
+      duration: state.duration,
+      error: state.error,
+    };
+  }
+
+  async cancelBuild(buildId: string): Promise<void> {
+    const state = this.buildStateService.getState(buildId);
+
+    if (!state) {
+      throw new NotFoundException(`Build ${buildId} not found`);
+    }
+
+    if (state.status === BuildStatus.COMPLETED || state.status === BuildStatus.FAILED) {
+      throw new BadRequestException('Cannot cancel completed or failed build');
+    }
+
+    await this.platformIOClient.cancelBuild(buildId);
   }
 }
