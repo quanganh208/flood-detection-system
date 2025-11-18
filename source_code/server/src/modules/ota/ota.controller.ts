@@ -10,13 +10,13 @@ export class OtaController {
   constructor(private readonly otaService: OtaService) {}
 
   @Get('check/:deviceId')
-  checkForUpdate(
+  async checkForUpdate(
     @Param('deviceId') deviceId: string,
     @Query('version') currentVersion: string = '0.0.0',
   ) {
     this.logger.log(`Device ${deviceId} checking for update (current: ${currentVersion})`);
 
-    const result = this.otaService.checkForUpdate(deviceId, currentVersion);
+    const result = await this.otaService.checkForUpdate(deviceId, currentVersion);
 
     return {
       success: true,
@@ -27,10 +27,10 @@ export class OtaController {
   @Get('download/:buildId')
   @Header('Content-Type', 'application/octet-stream')
   @Header('Content-Disposition', 'attachment; filename="firmware.bin"')
-  downloadFirmware(@Param('buildId') buildId: string, @Res() res: Response) {
+  async downloadFirmware(@Param('buildId') buildId: string, @Res() res: Response) {
     this.logger.log(`Downloading firmware: ${buildId}`);
 
-    const info = this.otaService.getFirmwareDownloadInfo(buildId);
+    const info = await this.otaService.getFirmwareDownloadInfo(buildId);
 
     res.setHeader('Content-Length', info.size);
     res.setHeader('x-MD5', info.md5);
@@ -40,13 +40,16 @@ export class OtaController {
   }
 
   @Post('verify/:deviceId')
-  verifyUpdate(
+  async verifyUpdate(
     @Param('deviceId') deviceId: string,
-    @Body() body: { buildId: string; status: 'success' | 'failed' },
+    @Body() body: { buildId: string; status: 'success' | 'failed'; errorMessage?: string },
   ) {
-    this.logger.log(`Device ${deviceId} reports: ${body.status} for build ${body.buildId}`);
-
-    const result = this.otaService.verifyUpdate(deviceId, body.buildId, body.status);
+    const result = await this.otaService.verifyUpdate(
+      deviceId,
+      body.buildId,
+      body.status,
+      body.errorMessage,
+    );
 
     return {
       success: true,

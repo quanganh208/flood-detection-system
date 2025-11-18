@@ -157,7 +157,6 @@
           'calt' 1;
       }
 
-      /* Enhanced background for dark mode */
       body.dark {
         background-image:
           radial-gradient(at 0% 0%, rgba(204, 13, 0, 0.08) 0px, transparent 50%),
@@ -165,14 +164,12 @@
           radial-gradient(at 100% 100%, rgba(204, 13, 0, 0.06) 0px, transparent 50%);
       }
 
-      /* Light mode subtle background */
       body:not(.dark) {
         background-image:
           radial-gradient(at 0% 0%, rgba(204, 13, 0, 0.03) 0px, transparent 50%),
           radial-gradient(at 100% 100%, rgba(204, 13, 0, 0.02) 0px, transparent 50%);
       }
 
-      /* Custom scrollbar */
       ::-webkit-scrollbar {
         width: 8px;
         height: 8px;
@@ -191,7 +188,6 @@
         background-color: hsl(var(--muted-foreground) / 0.5);
       }
 
-      /* Log level colors */
       .log-debug {
         color: #64748b;
         opacity: 0.8;
@@ -220,14 +216,12 @@
         font-weight: 500;
       }
 
-      /* Drag and drop styles */
       .upload-area.dragover {
         border-color: hsl(var(--primary));
         background-color: hsl(var(--primary) / 0.05);
         transform: scale(1.01);
       }
 
-      /* Horizontal Stepper Styles */
       .stepper-container {
         display: flex;
         align-items: center;
@@ -315,14 +309,34 @@
         color: hsl(var(--foreground));
       }
 
-      /* Upload Card Ready State */
       .upload-card-ready {
         animation: pulse-border 2s ease-in-out infinite;
       }
 
-      /* Build Button Pulse */
       .build-btn-ready {
         animation: pulse-glow 2s ease-in-out infinite;
+      }
+
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 100;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.75);
+        animation: fade-in 0.2s ease-out;
+      }
+
+      .modal.active {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .modal-content {
+        animation: fade-in 0.3s ease-out;
       }
     </style>
   </head>
@@ -649,6 +663,135 @@
       </div>
     </div>
 
+    <!-- Edit Metadata Modal -->
+    <div id="editModal" class="modal">
+      <div class="modal-content max-w-lg w-full mx-4">
+        <div class="rounded-lg border bg-card text-card-foreground shadow-lg">
+          <div class="flex flex-col space-y-1.5 p-6 pb-4 border-b">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xl font-semibold leading-none tracking-tight">Edit Firmware Metadata</h3>
+              <button
+                onclick="closeEditModal()"
+                class="inline-flex items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground h-8 w-8"
+              >
+                <i data-lucide="x" class="h-4 w-4"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-6 space-y-4">
+            <input type="hidden" id="editBuildId" />
+            <div>
+              <label class="text-sm font-medium mb-2 block">Version</label>
+              <input
+                type="text"
+                id="editVersion"
+                placeholder="e.g., 1.0.0"
+                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            </div>
+            <div>
+              <label class="text-sm font-medium mb-2 block">Description</label>
+              <input
+                type="text"
+                id="editDescription"
+                placeholder="Brief description"
+                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            </div>
+            <div>
+              <label class="text-sm font-medium mb-2 block">Release Notes</label>
+              <textarea
+                id="editReleaseNotes"
+                rows="4"
+                placeholder="What's new in this version?"
+                class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              ></textarea>
+            </div>
+            <div class="flex gap-3 pt-2">
+              <button
+                onclick="saveMetadata()"
+                class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 flex-1"
+              >
+                <i data-lucide="save" class="mr-2 h-4 w-4"></i>
+                Save Changes
+              </button>
+              <button
+                onclick="closeEditModal()"
+                class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- View Build Log Modal -->
+    <div id="logModal" class="modal">
+      <div class="modal-content max-w-4xl w-full mx-4">
+        <div class="rounded-lg border bg-card text-card-foreground shadow-lg">
+          <div class="flex flex-col space-y-1.5 p-6 pb-4 border-b">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-xl font-semibold leading-none tracking-tight mb-1">Build Log</h3>
+                <p id="logModalBuildId" class="text-sm text-muted-foreground font-mono"></p>
+              </div>
+              <button
+                onclick="closeLogModal()"
+                class="inline-flex items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground h-8 w-8"
+              >
+                <i data-lucide="x" class="h-4 w-4"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-6">
+            <div class="rounded-md border border-slate-700 bg-slate-950/95 overflow-hidden shadow-lg">
+              <div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-800 bg-slate-900/80">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="terminal" class="h-3.5 w-3.5 text-emerald-400"></i>
+                  <span class="text-xs font-semibold text-slate-200 tracking-wide">OUTPUT</span>
+                </div>
+                <div class="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span id="logModalStatus"></span>
+                  <span id="logModalDuration"></span>
+                </div>
+              </div>
+              <div
+                id="logModalContent"
+                class="p-4 font-mono text-xs leading-relaxed h-96 overflow-y-auto bg-slate-950/50 whitespace-pre-wrap text-slate-200"
+              ></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- View Source Files Modal -->
+    <div id="sourceModal" class="modal">
+      <div class="modal-content max-w-4xl w-full mx-4">
+        <div class="rounded-lg border bg-card text-card-foreground shadow-lg">
+          <div class="flex flex-col space-y-1.5 p-6 pb-4 border-b">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-xl font-semibold leading-none tracking-tight mb-1">Source Files</h3>
+                <p id="sourceModalBuildId" class="text-sm text-muted-foreground font-mono"></p>
+              </div>
+              <button
+                onclick="closeSourceModal()"
+                class="inline-flex items-center justify-center rounded-md text-sm font-medium hover:bg-accent hover:text-accent-foreground h-8 w-8"
+              >
+                <i data-lucide="x" class="h-4 w-4"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-6">
+            <div id="sourceFilesList" class="space-y-3"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script>
       lucide.createIcons();
 
@@ -665,6 +808,7 @@
       if (savedTheme === 'light') {
         htmlElement.classList.remove('dark');
       }
+
       document.addEventListener('DOMContentLoaded', () => {
         let codeFiles = [];
         let configFile = null;
@@ -700,7 +844,6 @@
         const firmwareList = document.getElementById('firmwareList');
         const refreshFirmwaresBtn = document.getElementById('refreshFirmwaresBtn');
 
-        // Stepper elements
         const stepperUpload = document.getElementById('stepperUpload');
         const stepperBuild = document.getElementById('stepperBuild');
         const stepperComplete = document.getElementById('stepperComplete');
@@ -708,7 +851,6 @@
         const req1 = document.getElementById('req1');
         const req2 = document.getElementById('req2');
 
-        // Validate all required elements exist
         const requiredElements = {
           codeUploadArea,
           codeFileInput,
@@ -736,19 +878,13 @@
 
         if (missingElements.length > 0) {
           alert('Critical error: Page elements not loaded. Please refresh the page.');
-          return; // Stop execution
+          return;
         }
 
-        // ============================================
-        // ATTACH EVENT LISTENERS
-        // ============================================
-
-        // Code files upload - Click handler
         codeUploadArea.addEventListener('click', () => {
           codeFileInput.click();
         });
 
-        // Code files upload - Drag & Drop
         codeUploadArea.addEventListener('dragover', (e) => {
           e.preventDefault();
           codeUploadArea.classList.add('dragover');
@@ -762,19 +898,15 @@
           handleCodeFiles(e.dataTransfer.files);
         });
 
-        // Code files upload - File input change
         codeFileInput.addEventListener('change', (e) => {
           handleCodeFiles(e.target.files);
-          // Reset input to allow re-selecting same files
           e.target.value = '';
         });
 
-        // Config file upload - Click handler
         configUploadArea.addEventListener('click', () => {
           configFileInput.click();
         });
 
-        // Config file upload - Drag & Drop
         configUploadArea.addEventListener('dragover', (e) => {
           e.preventDefault();
           configUploadArea.classList.add('dragover');
@@ -788,16 +920,10 @@
           handleConfigFile(e.dataTransfer.files);
         });
 
-        // Config file upload - File input change
         configFileInput.addEventListener('change', (e) => {
           handleConfigFile(e.target.files);
-          // Reset input to allow re-selecting same files
           e.target.value = '';
         });
-
-        // ============================================
-        // FILE HANDLING FUNCTIONS
-        // ============================================
 
         function handleCodeFiles(files) {
           const validFiles = Array.from(files).filter(
@@ -916,7 +1042,6 @@
           updateBuildButton();
         }
 
-        // Expose remove functions to global scope for onclick handlers
         window.removeCodeFile = removeCodeFile;
         window.removeConfigFile = removeConfigFile;
 
@@ -925,14 +1050,12 @@
           const hasConfigFile = configFile !== null;
           const allFilesReady = hasCodeFiles && hasConfigFile;
 
-          // Update Upload Card appearance
           if (allFilesReady) {
             uploadCard.classList.add('upload-card-ready');
           } else {
             uploadCard.classList.remove('upload-card-ready');
           }
 
-          // Update requirements checklist
           if (hasCodeFiles) {
             const icon1 = req1.querySelector('svg') || req1.querySelector('i');
             if (icon1) {
@@ -961,7 +1084,6 @@
             }
           }
 
-          // Update Stepper - Upload Step
           if (allFilesReady) {
             stepperUpload.classList.remove('pending');
             stepperUpload.classList.add('completed');
@@ -974,7 +1096,6 @@
             stepperUpload.querySelector('.step-check').classList.add('hidden');
           }
 
-          // Update Build Status Badge
           if (allFilesReady) {
             buildStatusBadge.textContent = 'Ready';
             buildStatusBadge.className =
@@ -1025,7 +1146,6 @@
             warning: 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400',
           };
 
-          // Preserve spacing and animation classes while updating notification styling
           statusMessage.className = `mb-4 animate-fade-in flex items-start gap-3 p-4 rounded-lg border ${classes[type]}`;
           statusMessage.innerHTML = `
             <i data-lucide="${icons[type]}" class="h-5 w-5 flex-shrink-0 mt-0.5"></i>
@@ -1034,7 +1154,6 @@
           statusMessage.classList.remove('hidden');
           lucide.createIcons();
 
-          // Scroll to status message
           statusMessage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
@@ -1092,13 +1211,11 @@
             buildLogContainer.classList.remove('hidden');
             updateProgress(0, 'initializing', 'Build started...');
 
-            // Update stepper - Build step active
             stepperBuild.classList.remove('pending');
             stepperBuild.classList.add('active');
             stepperBuild.querySelector('.step-number').classList.add('hidden');
             stepperBuild.querySelector('.step-loading').classList.remove('hidden');
 
-            // Update status badge
             buildStatusBadge.textContent = 'Building...';
             buildStatusBadge.className =
               'text-sm px-3 py-1.5 rounded-full bg-primary/15 text-primary font-medium animate-pulse-glow';
@@ -1154,7 +1271,6 @@
                 appendLog(`MD5: ${data.md5}`, 'info');
               }
 
-              // Update stepper - Complete
               stepperBuild.classList.remove('active');
               stepperBuild.classList.add('completed');
               stepperBuild.querySelector('.step-loading').classList.add('hidden');
@@ -1165,16 +1281,14 @@
               stepperComplete.querySelector('.step-number').classList.add('hidden');
               stepperComplete.querySelector('.step-check').classList.remove('hidden');
 
-              // Update status badge
               buildStatusBadge.textContent = 'Completed';
               buildStatusBadge.className =
                 'text-sm px-3 py-1.5 rounded-full bg-green-500/15 text-green-600 dark:text-green-400 font-medium';
 
-              loadFirmwares();
+              // Wait a bit for database to update before reloading list
+              setTimeout(() => loadFirmwares(), 1000);
 
-              // Reset UI after 3 seconds to allow user to see success state
               setTimeout(() => {
-                // Clear files and reset UI
                 codeFiles = [];
                 configFile = null;
                 renderCodeFileList();
@@ -1182,7 +1296,6 @@
                 updateStepIndicators();
                 updateBuildButton();
 
-                // Reset stepper to initial state
                 stepperUpload.classList.remove('completed');
                 stepperUpload.classList.add('pending');
                 stepperUpload.querySelector('.step-number').classList.remove('hidden');
@@ -1206,13 +1319,12 @@
                   'text-sm px-3 py-1.5 rounded-full bg-muted text-muted-foreground font-medium';
 
                 lucide.createIcons();
-              }, 3000); // Reset after 3 seconds
+              }, 3000);
             } else {
               updateProgress(100, 'failed', 'Build failed');
               showStatus(`Build failed after ${duration}s`, 'error');
               appendLog('\n=== Build failed ===', 'error');
 
-              // Update stepper - Failed
               stepperBuild.classList.remove('active');
               stepperBuild.querySelector('.step-loading').classList.add('hidden');
               stepperBuild.querySelector('.step-number').classList.remove('hidden');
@@ -1222,7 +1334,6 @@
               stepperBuild.querySelector('.stepper-circle').style.borderColor =
                 'hsl(var(--destructive))';
 
-              // Update status badge
               buildStatusBadge.textContent = 'Failed';
               buildStatusBadge.className =
                 'text-sm px-3 py-1.5 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 font-medium';
@@ -1248,6 +1359,9 @@
                 data.suggestions.forEach((s) => appendLog(`  - ${s}`, 'info'));
               }
 
+              // Wait a bit for database to update before reloading list
+              setTimeout(() => loadFirmwares(), 1000);
+
               closeSSEConnection();
               resetBuildUI();
             }
@@ -1257,6 +1371,10 @@
             const data = JSON.parse(e.data);
             showStatus(`Build cancelled: ${data.reason}`, 'warning');
             appendLog(`\nBuild cancelled: ${data.message || data.reason}`, 'warning');
+
+            // Wait a bit for database to update before reloading list
+            setTimeout(() => loadFirmwares(), 1000);
+
             closeSSEConnection();
             resetBuildUI();
           });
@@ -1379,6 +1497,19 @@
           }
         });
 
+        function getBuildStatusBadge(status) {
+          const badges = {
+            PENDING: '<span class="text-xs px-2.5 py-1 rounded-full bg-slate-500/15 text-slate-600 dark:text-slate-400">Pending</span>',
+            QUEUED: '<span class="text-xs px-2.5 py-1 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400">Queued</span>',
+            BUILDING: '<span class="text-xs px-2.5 py-1 rounded-full bg-yellow-500/15 text-yellow-600 dark:text-yellow-400">Building</span>',
+            TESTING: '<span class="text-xs px-2.5 py-1 rounded-full bg-purple-500/15 text-purple-600 dark:text-purple-400">Testing</span>',
+            COMPLETED: '<span class="text-xs px-2.5 py-1 rounded-full bg-green-500/15 text-green-600 dark:text-green-400">Completed</span>',
+            FAILED: '<span class="text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-red-600 dark:text-red-400">Failed</span>',
+            CANCELLED: '<span class="text-xs px-2.5 py-1 rounded-full bg-gray-500/15 text-gray-600 dark:text-gray-400">Cancelled</span>',
+          };
+          return badges[status] || badges.PENDING;
+        }
+
         async function loadFirmwares() {
           firmwareList.innerHTML =
             '<div class="flex items-center justify-center py-4"><i data-lucide="loader" class="h-5 w-5 text-muted-foreground animate-spin"></i><span class="ml-2 text-sm text-muted-foreground">Loading...</span></div>';
@@ -1392,38 +1523,103 @@
               firmwareList.innerHTML = result.data
                 .map((firmware) => {
                   const date = new Date(firmware.created).toLocaleString();
+                  const statusBadge = getBuildStatusBadge(firmware.buildStatus);
+                  const isLatestBadge = firmware.isLatest
+                    ? '<span class="text-xs px-2.5 py-1 rounded-full bg-primary/15 text-primary font-medium">Latest</span>'
+                    : '';
+                  const description = firmware.description
+                    ? `<p class="text-xs text-muted-foreground mt-1">${firmware.description}</p>`
+                    : '';
+
                   return `
-                  <div class="flex items-center justify-between p-4 rounded-lg border bg-accent/50 hover:bg-accent transition-colors group">
-                    <div class="flex-1 min-w-0">
-                      <div class="flex items-center gap-2 mb-1">
-                        <i data-lucide="cpu" class="h-4 w-4 text-primary flex-shrink-0"></i>
-                        <span class="font-mono text-sm font-medium truncate">${firmware.buildId}</span>
-                      </div>
-                      <div class="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span class="flex items-center gap-1">
-                          <i data-lucide="hard-drive" class="h-3 w-3"></i>
-                          ${formatBytes(firmware.size)}
-                        </span>
-                        <span class="flex items-center gap-1">
-                          <i data-lucide="calendar" class="h-3 w-3"></i>
-                          ${date}
-                        </span>
+                  <div class="rounded-lg border bg-accent/50 hover:bg-accent transition-colors p-4 space-y-3">
+                    <div class="flex items-start justify-between">
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 mb-1 flex-wrap">
+                          <i data-lucide="cpu" class="h-4 w-4 text-primary flex-shrink-0"></i>
+                          <span class="font-mono text-sm font-medium truncate">${firmware.buildId}</span>
+                          ${isLatestBadge}
+                          ${statusBadge}
+                        </div>
+                        <div class="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                          <span class="flex items-center gap-1">
+                            <i data-lucide="tag" class="h-3 w-3"></i>
+                            ${firmware.version}
+                          </span>
+                          <span class="flex items-center gap-1">
+                            <i data-lucide="hard-drive" class="h-3 w-3"></i>
+                            ${formatBytes(firmware.size)}
+                          </span>
+                          <span class="flex items-center gap-1">
+                            <i data-lucide="calendar" class="h-3 w-3"></i>
+                            ${date}
+                          </span>
+                          ${firmware.buildDuration ? `<span class="flex items-center gap-1"><i data-lucide="clock" class="h-3 w-3"></i>${(firmware.buildDuration / 1000).toFixed(1)}s</span>` : ''}
+                          ${firmware.md5 ? `<span class="flex items-center gap-1 font-mono"><i data-lucide="hash" class="h-3 w-3"></i>${firmware.md5.substring(0, 8)}...</span>` : ''}
+                        </div>
+                        ${description}
                       </div>
                     </div>
-                    <div class="flex items-center gap-2 ml-4">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      ${
+                        firmware.buildStatus === 'COMPLETED' && !firmware.isLatest
+                          ? `
+                        <button
+                          onclick="promoteToLatest('${firmware.buildId}')"
+                          class="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-3"
+                          title="Mark as latest version"
+                        >
+                          <i data-lucide="star" class="mr-1.5 h-3.5 w-3.5"></i>
+                          Promote to Latest
+                        </button>
+                      `
+                          : ''
+                      }
                       <button
-                        onclick="downloadFirmware('${firmware.buildId}')"
-                        class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-3"
-                        title="Download firmware"
+                        onclick="openEditModal('${firmware.buildId}', '${firmware.version}', '${firmware.description || ''}', '')"
+                        class="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3"
+                        title="Edit metadata"
                       >
-                        <i data-lucide="download" class="h-4 w-4"></i>
+                        <i data-lucide="edit" class="mr-1.5 h-3.5 w-3.5"></i>
+                        Edit
                       </button>
                       <button
+                        onclick="viewBuildLog('${firmware.buildId}')"
+                        class="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3"
+                        title="View build log"
+                      >
+                        <i data-lucide="file-text" class="mr-1.5 h-3.5 w-3.5"></i>
+                        Log
+                      </button>
+                      <button
+                        onclick="viewSourceFiles('${firmware.buildId}')"
+                        class="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3"
+                        title="View source files"
+                      >
+                        <i data-lucide="code" class="mr-1.5 h-3.5 w-3.5"></i>
+                        Source
+                      </button>
+                      ${
+                        firmware.buildStatus === 'COMPLETED'
+                          ? `
+                        <button
+                          onclick="downloadFirmware('${firmware.buildId}')"
+                          class="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-green-600 text-white hover:bg-green-700 h-8 px-3"
+                          title="Download firmware"
+                        >
+                          <i data-lucide="download" class="mr-1.5 h-3.5 w-3.5"></i>
+                          Download
+                        </button>
+                      `
+                          : ''
+                      }
+                      <button
                         onclick="deleteFirmware('${firmware.buildId}')"
-                        class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-destructive text-destructive-foreground hover:bg-destructive/90 h-9 px-3"
+                        class="inline-flex items-center justify-center rounded-md text-xs font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-destructive text-destructive-foreground hover:bg-destructive/90 h-8 px-3"
                         title="Delete firmware"
                       >
-                        <i data-lucide="trash-2" class="h-4 w-4"></i>
+                        <i data-lucide="trash-2" class="mr-1.5 h-3.5 w-3.5"></i>
+                        Delete
                       </button>
                     </div>
                   </div>
@@ -1471,10 +1667,153 @@
           }
         }
 
-        refreshFirmwaresBtn.addEventListener('click', loadFirmwares);
+        async function promoteToLatest(buildId) {
+          if (!confirm(`Mark firmware ${buildId} as the latest version?`)) return;
+
+          try {
+            const response = await fetch(`/api/firmware/${buildId}/promote`, {
+              method: 'POST',
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+              loadFirmwares();
+              showStatus(`Firmware ${buildId} is now the latest version`, 'success');
+            } else {
+              showStatus(result.message || 'Failed to promote firmware', 'error');
+            }
+          } catch (error) {
+            showStatus(`Error: ${error.message}`, 'error');
+          }
+        }
+
+        function openEditModal(buildId, version, description, releaseNotes) {
+          document.getElementById('editBuildId').value = buildId;
+          document.getElementById('editVersion').value = version;
+          document.getElementById('editDescription').value = description;
+          document.getElementById('editReleaseNotes').value = releaseNotes;
+          document.getElementById('editModal').classList.add('active');
+          lucide.createIcons();
+        }
+
+        function closeEditModal() {
+          document.getElementById('editModal').classList.remove('active');
+        }
+
+        async function saveMetadata() {
+          const buildId = document.getElementById('editBuildId').value;
+          const version = document.getElementById('editVersion').value;
+          const description = document.getElementById('editDescription').value;
+          const releaseNotes = document.getElementById('editReleaseNotes').value;
+
+          try {
+            const response = await fetch(`/api/firmware/${buildId}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                version,
+                description,
+                releaseNotes,
+              }),
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+              closeEditModal();
+              loadFirmwares();
+              showStatus('Firmware metadata updated successfully', 'success');
+            } else {
+              showStatus(result.message || 'Failed to update metadata', 'error');
+            }
+          } catch (error) {
+            showStatus(`Error: ${error.message}`, 'error');
+          }
+        }
+
+        async function viewBuildLog(buildId) {
+          try {
+            const response = await fetch(`/api/firmware/${buildId}/build-log`);
+            const result = await response.json();
+
+            if (result.success) {
+              document.getElementById('logModalBuildId').textContent = buildId;
+              document.getElementById('logModalStatus').textContent = result.data.buildStatus;
+              document.getElementById('logModalDuration').textContent = result.data.buildDuration
+                ? `${(result.data.buildDuration / 1000).toFixed(1)}s`
+                : '';
+              document.getElementById('logModalContent').textContent =
+                result.data.buildLog || 'No build log available';
+              document.getElementById('logModal').classList.add('active');
+              lucide.createIcons();
+            } else {
+              showStatus(result.message || 'Failed to load build log', 'error');
+            }
+          } catch (error) {
+            showStatus(`Error: ${error.message}`, 'error');
+          }
+        }
+
+        function closeLogModal() {
+          document.getElementById('logModal').classList.remove('active');
+        }
+
+        async function viewSourceFiles(buildId) {
+          try {
+            document.getElementById('sourceModalBuildId').textContent = buildId;
+            const response = await fetch(`/api/firmware/${buildId}/source-files`);
+            const result = await response.json();
+
+            if (result.success) {
+              const filesList = document.getElementById('sourceFilesList');
+
+              if (result.data.files && result.data.files.length > 0) {
+                filesList.innerHTML = result.data.files
+                  .map(
+                    (file) => `
+                  <div class="rounded-md border border-slate-700 bg-slate-950/95 overflow-hidden shadow-lg">
+                    <div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-800 bg-slate-900/80">
+                      <div class="flex items-center gap-2">
+                        <i data-lucide="file-code" class="h-3.5 w-3.5 text-purple-400"></i>
+                        <span class="text-xs font-semibold text-slate-200 tracking-wide">${file.path}</span>
+                      </div>
+                    </div>
+                    <div class="p-4 font-mono text-xs leading-relaxed max-h-64 overflow-y-auto bg-slate-950/50 whitespace-pre-wrap text-slate-200">${file.content}</div>
+                  </div>
+                `,
+                  )
+                  .join('');
+              } else {
+                filesList.innerHTML = '<p class="text-muted-foreground text-center py-8">No source files available</p>';
+              }
+
+              document.getElementById('sourceModal').classList.add('active');
+              lucide.createIcons();
+            }
+          } catch (error) {
+            showStatus(`Error loading source files: ${error.message}`, 'error');
+          }
+        }
+
+        function closeSourceModal() {
+          document.getElementById('sourceModal').classList.remove('active');
+        }
 
         window.downloadFirmware = downloadFirmware;
         window.deleteFirmware = deleteFirmware;
+        window.promoteToLatest = promoteToLatest;
+        window.openEditModal = openEditModal;
+        window.closeEditModal = closeEditModal;
+        window.saveMetadata = saveMetadata;
+        window.viewBuildLog = viewBuildLog;
+        window.closeLogModal = closeLogModal;
+        window.viewSourceFiles = viewSourceFiles;
+        window.closeSourceModal = closeSourceModal;
+
+        refreshFirmwaresBtn.addEventListener('click', loadFirmwares);
 
         updateStepIndicators();
         updateBuildButton();

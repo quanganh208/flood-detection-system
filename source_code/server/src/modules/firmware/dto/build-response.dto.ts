@@ -2,6 +2,8 @@
  * Build Response DTOs
  */
 
+import { BuildStatus } from '@prisma/client';
+
 export interface BuildResponse {
   success: boolean;
   build_id: string;
@@ -23,14 +25,7 @@ export interface BuildStatusResponse {
   error?: string;
 }
 
-export enum BuildStatus {
-  QUEUED = 'queued',
-  BUILDING = 'building',
-  COMPLETED = 'completed',
-  FAILED = 'failed',
-  CANCELLED = 'cancelled',
-  EXPIRED = 'expired',
-}
+export { BuildStatus };
 
 export interface QueueStatusResponse {
   queueLength: number;

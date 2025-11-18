@@ -304,6 +304,9 @@ class PlatformIOBuilder:
 
             logger.info(f"Build completed successfully: {output_path}")
 
+            # Calculate build duration in milliseconds
+            duration_ms = int((time.time() - start_time) * 1000)
+
             # Emit success event
             yield {
                 'event': 'build_complete',
@@ -312,6 +315,7 @@ class PlatformIOBuilder:
                     'firmware_url': f'/download/{self.build_dir.name}',
                     'size': file_size,
                     'md5': md5_hash,
+                    'duration': duration_ms,
                     'timestamp': time.time()
                 }
             }

@@ -3,7 +3,9 @@ import {
   Post,
   Get,
   Delete,
+  Patch,
   Param,
+  Body,
   UseInterceptors,
   UploadedFiles,
   BadRequestException,
@@ -83,8 +85,8 @@ export class FirmwareController {
   }
 
   @Get()
-  listFirmwares() {
-    const firmwares = this.firmwareService.listFirmwares();
+  async listFirmwares() {
+    const firmwares = await this.firmwareService.listFirmwares();
 
     return {
       success: true,
@@ -93,9 +95,63 @@ export class FirmwareController {
     };
   }
 
+  @Get(':buildId/build-log')
+  async getBuildLog(@Param('buildId') buildId: string) {
+    const firmware = await this.firmwareService.getFirmwareInfo(buildId);
+
+    return {
+      success: true,
+      data: {
+        buildId,
+        buildLog: firmware.buildLog,
+        buildStatus: firmware.buildStatus,
+        buildDuration: firmware.buildDuration,
+      },
+    };
+  }
+
+  @Get(':buildId/source-files')
+  async getSourceFiles(@Param('buildId') buildId: string) {
+    const result = await this.firmwareService.getSourceFiles(buildId);
+
+    return {
+      success: true,
+      data: {
+        buildId,
+        fileList: result.fileList,
+        files: result.files,
+      },
+    };
+  }
+
+  @Post(':buildId/promote')
+  async promoteToLatest(@Param('buildId') buildId: string) {
+    await this.firmwareService.promoteToLatest(buildId);
+
+    return {
+      success: true,
+      message: 'Firmware promoted to latest version',
+      data: { buildId },
+    };
+  }
+
+  @Patch(':buildId')
+  async updateMetadata(
+    @Param('buildId') buildId: string,
+    @Body() metadata: { version?: string; description?: string; releaseNotes?: string },
+  ) {
+    const updated = await this.firmwareService.updateFirmwareMetadata(buildId, metadata);
+
+    return {
+      success: true,
+      message: 'Firmware metadata updated',
+      data: updated,
+    };
+  }
+
   @Get(':buildId')
-  getFirmwareInfo(@Param('buildId') buildId: string) {
-    const info = this.firmwareService.getFirmwareInfo(buildId);
+  async getFirmwareInfo(@Param('buildId') buildId: string) {
+    const info = await this.firmwareService.getFirmwareInfo(buildId);
 
     return {
       success: true,
@@ -107,8 +163,8 @@ export class FirmwareController {
   }
 
   @Delete(':buildId')
-  deleteFirmware(@Param('buildId') buildId: string) {
-    this.firmwareService.deleteFirmware(buildId);
+  async deleteFirmware(@Param('buildId') buildId: string) {
+    await this.firmwareService.deleteFirmware(buildId);
 
     return {
       success: true,

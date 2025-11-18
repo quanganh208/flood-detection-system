@@ -1,10 +1,17 @@
 FROM node:20-alpine
 
+# Install git for husky hooks setup
+RUN apk add --no-cache git
+
 WORKDIR /app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm ci --ignore-scripts
+
+# Copy Prisma schema and generate client
+COPY prisma ./prisma
+RUN npx prisma generate
 
 # Copy source code
 COPY . .

@@ -81,7 +81,7 @@ export class PlatformIOClientService {
 
       this.logger.log(`SSE stream connected, status: ${streamResponse.status}`);
 
-      this.consumeSSEStream(buildId, streamResponse.data);
+      this.consumeSSEStream(buildId, streamResponse.data as NodeJS.ReadableStream);
     } catch (error) {
       this.handleBuildError(buildId, error);
     }
@@ -202,9 +202,12 @@ export class PlatformIOClientService {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const parsedData = JSON.parse(data);
 
-      this.updateStateFromEvent(buildId, eventType, parsedData);
+      this.updateStateFromEvent(buildId, eventType, parsedData as Record<string, unknown>);
 
-      const transformedData = this.transformEventData(eventType, parsedData);
+      const transformedData = this.transformEventData(
+        eventType,
+        parsedData as Record<string, unknown>,
+      );
 
       this.buildStreamService.emitBuildEvent(buildId, {
         event: eventType,
@@ -294,6 +297,16 @@ export class PlatformIOClientService {
         updates.status = BuildStatus.BUILDING;
         updates.startedAt = new Date();
         break;
+
+      case 'log': {
+        const logMessage = eventData.line as string;
+        if (logMessage) {
+          const currentState = this.buildStateService.getState(buildId);
+          const existingLog = currentState?.buildLog || '';
+          updates.buildLog = existingLog + logMessage + '\n';
+        }
+        break;
+      }
 
       case 'progress':
         updates.stage = eventData.stage as string;

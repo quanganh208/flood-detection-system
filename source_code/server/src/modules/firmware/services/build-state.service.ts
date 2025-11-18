@@ -13,6 +13,7 @@ export interface BuildState {
   fileCount: number;
   queuePosition?: number;
   error?: string;
+  buildLog?: string;
   firmwareUrl?: string;
   size?: number;
   md5?: string;

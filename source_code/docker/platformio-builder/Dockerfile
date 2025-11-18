@@ -1,14 +1,11 @@
 # PlatformIO Builder Service Dockerfile
-# Multi-stage build for optimized image size
+# Using full python image which includes build tools
 
-FROM python:3.11-slim as base
+FROM python:3.11 as base
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Try to install additional tools, but don't fail if network issues
+RUN apt-get update && apt-get install -y git curl || echo "Warning: Could not install additional packages, continuing..." && \
+    rm -rf /var/lib/apt/lists/* || true
 
 # Create non-root user
 RUN useradd -m -u 1000 builder && \

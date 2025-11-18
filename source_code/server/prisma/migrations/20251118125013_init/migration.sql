@@ -11,7 +11,16 @@ CREATE TYPE "AlertType" AS ENUM ('WATER_WARNING', 'WATER_DANGER', 'HEAVY_RAIN', 
 CREATE TYPE "AlertSeverity" AS ENUM ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL');
 
 -- CreateEnum
-CREATE TYPE "OTAStatus" AS ENUM ('PENDING', 'DOWNLOADING', 'INSTALLING', 'SUCCESS', 'FAILED');
+CREATE TYPE "BuildStatus" AS ENUM ('PENDING', 'QUEUED', 'BUILDING', 'TESTING', 'COMPLETED', 'FAILED', 'CANCELLED');
+
+-- CreateEnum
+CREATE TYPE "OTAStatus" AS ENUM ('PENDING', 'CHECKING', 'DOWNLOADING', 'VERIFYING', 'INSTALLING', 'REBOOTING', 'COMPLETED', 'FAILED', 'ROLLED_BACK', 'CANCELLED');
+
+-- CreateEnum
+CREATE TYPE "DeployStrategy" AS ENUM ('MANUAL', 'ALL_DEVICES', 'GRADUAL', 'CANARY', 'SCHEDULED');
+
+-- CreateEnum
+CREATE TYPE "DeployStatus" AS ENUM ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED', 'CANCELLED', 'ROLLED_BACK');
 
 -- CreateTable
 CREATE TABLE "devices" (
@@ -31,6 +40,9 @@ CREATE TABLE "devices" (
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "lastHeartbeat" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "uptime" INTEGER NOT NULL DEFAULT 0,
+    "chipModel" TEXT,
+    "freeHeap" INTEGER,
+    "flashSize" INTEGER,
     "registeredAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -69,34 +81,77 @@ CREATE TABLE "alerts" (
 );
 
 -- CreateTable
-CREATE TABLE "firmware_versions" (
+CREATE TABLE "firmwares" (
     "id" TEXT NOT NULL,
     "buildId" TEXT NOT NULL,
     "version" TEXT NOT NULL,
+    "sourceFiles" JSONB NOT NULL,
+    "configFile" TEXT,
+    "buildLog" TEXT,
+    "buildDuration" INTEGER,
+    "buildStatus" "BuildStatus" NOT NULL DEFAULT 'PENDING',
     "filePath" TEXT NOT NULL,
     "fileSize" INTEGER NOT NULL,
     "md5Checksum" TEXT NOT NULL,
+    "description" TEXT,
     "releaseNotes" TEXT,
-    "isStable" BOOLEAN NOT NULL DEFAULT false,
+    "isLatest" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "publishedAt" TIMESTAMP(3),
 
-    CONSTRAINT "firmware_versions_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "firmwares_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
-CREATE TABLE "ota_history" (
+CREATE TABLE "deployments" (
+    "id" TEXT NOT NULL,
+    "strategy" "DeployStrategy" NOT NULL DEFAULT 'MANUAL',
+    "targetDevices" JSONB,
+    "rolloutPercent" INTEGER NOT NULL DEFAULT 100,
+    "status" "DeployStatus" NOT NULL DEFAULT 'PENDING',
+    "totalDevices" INTEGER NOT NULL DEFAULT 0,
+    "successCount" INTEGER NOT NULL DEFAULT 0,
+    "failureCount" INTEGER NOT NULL DEFAULT 0,
+    "pendingCount" INTEGER NOT NULL DEFAULT 0,
+    "scheduledAt" TIMESTAMP(3),
+    "startedAt" TIMESTAMP(3),
+    "completedAt" TIMESTAMP(3),
+    "firmwareId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "deployments_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ota_updates" (
     "id" TEXT NOT NULL,
     "fromVersion" TEXT NOT NULL,
     "toVersion" TEXT NOT NULL,
-    "status" "OTAStatus" NOT NULL,
+    "status" "OTAStatus" NOT NULL DEFAULT 'PENDING',
+    "progress" INTEGER NOT NULL DEFAULT 0,
+    "attempt" INTEGER NOT NULL DEFAULT 1,
+    "maxAttempts" INTEGER NOT NULL DEFAULT 3,
     "success" BOOLEAN NOT NULL DEFAULT false,
+    "errorCode" TEXT,
     "errorMessage" TEXT,
-    "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "downloadTime" INTEGER,
+    "installTime" INTEGER,
+    "totalTime" INTEGER,
+    "bytesDownloaded" INTEGER,
+    "checksumMatch" BOOLEAN,
+    "rollbackReason" TEXT,
+    "initiatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "downloadedAt" TIMESTAMP(3),
+    "installedAt" TIMESTAMP(3),
+    "verifiedAt" TIMESTAMP(3),
     "completedAt" TIMESTAMP(3),
     "deviceId" TEXT NOT NULL,
     "firmwareId" TEXT NOT NULL,
+    "deploymentId" TEXT,
 
-    CONSTRAINT "ota_history_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "ota_updates_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -139,22 +194,40 @@ CREATE INDEX "alerts_isResolved_idx" ON "alerts"("isResolved");
 CREATE INDEX "alerts_severity_idx" ON "alerts"("severity");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "firmware_versions_buildId_key" ON "firmware_versions"("buildId");
+CREATE UNIQUE INDEX "firmwares_buildId_key" ON "firmwares"("buildId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "firmware_versions_version_key" ON "firmware_versions"("version");
+CREATE INDEX "firmwares_buildId_idx" ON "firmwares"("buildId");
 
 -- CreateIndex
-CREATE INDEX "firmware_versions_version_idx" ON "firmware_versions"("version");
+CREATE INDEX "firmwares_version_idx" ON "firmwares"("version");
 
 -- CreateIndex
-CREATE INDEX "firmware_versions_buildId_idx" ON "firmware_versions"("buildId");
+CREATE INDEX "firmwares_isLatest_idx" ON "firmwares"("isLatest");
 
 -- CreateIndex
-CREATE INDEX "ota_history_deviceId_startedAt_idx" ON "ota_history"("deviceId", "startedAt");
+CREATE INDEX "firmwares_buildStatus_idx" ON "firmwares"("buildStatus");
 
 -- CreateIndex
-CREATE INDEX "ota_history_status_idx" ON "ota_history"("status");
+CREATE INDEX "firmwares_createdAt_idx" ON "firmwares"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "deployments_status_idx" ON "deployments"("status");
+
+-- CreateIndex
+CREATE INDEX "deployments_firmwareId_idx" ON "deployments"("firmwareId");
+
+-- CreateIndex
+CREATE INDEX "ota_updates_deviceId_initiatedAt_idx" ON "ota_updates"("deviceId", "initiatedAt");
+
+-- CreateIndex
+CREATE INDEX "ota_updates_status_idx" ON "ota_updates"("status");
+
+-- CreateIndex
+CREATE INDEX "ota_updates_firmwareId_idx" ON "ota_updates"("firmwareId");
+
+-- CreateIndex
+CREATE INDEX "ota_updates_deploymentId_idx" ON "ota_updates"("deploymentId");
 
 -- AddForeignKey
 ALTER TABLE "sensor_readings" ADD CONSTRAINT "sensor_readings_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "devices"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -163,7 +236,13 @@ ALTER TABLE "sensor_readings" ADD CONSTRAINT "sensor_readings_deviceId_fkey" FOR
 ALTER TABLE "alerts" ADD CONSTRAINT "alerts_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "devices"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ota_history" ADD CONSTRAINT "ota_history_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "devices"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "deployments" ADD CONSTRAINT "deployments_firmwareId_fkey" FOREIGN KEY ("firmwareId") REFERENCES "firmwares"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ota_history" ADD CONSTRAINT "ota_history_firmwareId_fkey" FOREIGN KEY ("firmwareId") REFERENCES "firmware_versions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ota_updates" ADD CONSTRAINT "ota_updates_deviceId_fkey" FOREIGN KEY ("deviceId") REFERENCES "devices"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ota_updates" ADD CONSTRAINT "ota_updates_firmwareId_fkey" FOREIGN KEY ("firmwareId") REFERENCES "firmwares"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ota_updates" ADD CONSTRAINT "ota_updates_deploymentId_fkey" FOREIGN KEY ("deploymentId") REFERENCES "deployments"("id") ON DELETE SET NULL ON UPDATE CASCADE;

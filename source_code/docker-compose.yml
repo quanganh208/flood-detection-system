@@ -16,13 +16,11 @@ services:
     volumes:
       - ./server:/app
       - /app/node_modules
-      - ./storage/firmware:/storage/firmware
-      - ./storage/uploads:/storage/uploads
+      - firmware-storage:/storage/firmware
+      - uploads-storage:/storage/uploads
     depends_on:
       postgres:
         condition: service_healthy
-      mosquitto:
-        condition: service_started
       platformio-builder:
         condition: service_started
     networks:
@@ -38,7 +36,7 @@ services:
     ports:
       - "5001:5000"
     volumes:
-      - ./storage/builds:/builds
+      - platformio-builds:/builds
       - platformio-cache:/root/.platformio
     networks:
       - flood-network
@@ -73,12 +71,13 @@ services:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - ./docker/mosquitto/config:/mosquitto/config
-      - ./storage/mosquitto/data:/mosquitto/data
-      - ./storage/mosquitto/log:/mosquitto/log
+      - mosquitto-config:/mosquitto/config
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
     networks:
       - flood-network
     restart: unless-stopped
+    command: mosquitto -c /mosquitto-no-auth.conf
 
 networks:
   flood-network:
@@ -86,4 +85,10 @@ networks:
 
 volumes:
   platformio-cache:
+  platformio-builds:
   postgres-data:
+  firmware-storage:
+  uploads-storage:
+  mosquitto-config:
+  mosquitto-data:
+  mosquitto-log:

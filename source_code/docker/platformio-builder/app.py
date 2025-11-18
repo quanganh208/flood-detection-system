@@ -479,6 +479,130 @@ def cancel_build(build_id: str):
         }), 500
 
 
+@app.route('/build/<build_id>', methods=['DELETE'])
+def delete_build(build_id: str):
+    """
+    Delete a build directory and all its files
+
+    Args:
+        build_id: Build identifier
+
+    Returns:
+        Success message or error
+    """
+    try:
+        # Validate build_id format
+        try:
+            uuid.UUID(build_id)
+        except ValueError:
+            return jsonify({
+                'error': 'Invalid build ID format',
+                'code': 'INVALID_BUILD_ID'
+            }), 400
+
+        build_dir = Config.BUILDS_DIR / build_id
+
+        if not build_dir.exists():
+            return jsonify({
+                'error': 'Build directory not found',
+                'code': 'NOT_FOUND'
+            }), 404
+
+        # Cannot delete active builds
+        if build_id in active_builds:
+            return jsonify({
+                'error': 'Cannot delete active build',
+                'code': 'BUILD_ACTIVE'
+            }), 400
+
+        # Delete build directory
+        shutil.rmtree(build_dir, ignore_errors=True)
+        logger.info(f"Deleted build directory: {build_id}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Build directory deleted',
+            'build_id': build_id
+        })
+
+    except Exception as e:
+        logger.error(f"Error deleting build: {e}", exc_info=True)
+        return jsonify({
+            'error': str(e),
+            'code': 'DELETE_ERROR'
+        }), 500
+
+
+@app.route('/build/<build_id>/files', methods=['GET'])
+def get_build_files(build_id: str):
+    """
+    Get source files for a build
+
+    Args:
+        build_id: Build identifier
+
+    Returns:
+        List of files with their content
+    """
+    try:
+        # Validate build_id format
+        try:
+            uuid.UUID(build_id)
+        except ValueError:
+            return jsonify({
+                'error': 'Invalid build ID format',
+                'code': 'INVALID_BUILD_ID'
+            }), 400
+
+        build_dir = Config.BUILDS_DIR / build_id
+
+        if not build_dir.exists():
+            return jsonify({
+                'error': 'Build directory not found',
+                'code': 'NOT_FOUND'
+            }), 404
+
+        files = []
+
+        # Get platformio.ini
+        platformio_ini = build_dir / 'platformio.ini'
+        if platformio_ini.exists():
+            files.append({
+                'name': 'platformio.ini',
+                'content': platformio_ini.read_text(encoding='utf-8'),
+                'path': 'platformio.ini'
+            })
+
+        # Get all source files from src/ directory
+        src_dir = build_dir / 'src'
+        if src_dir.exists():
+            for file_path in src_dir.rglob('*'):
+                if file_path.is_file():
+                    try:
+                        relative_path = file_path.relative_to(build_dir)
+                        files.append({
+                            'name': file_path.name,
+                            'content': file_path.read_text(encoding='utf-8'),
+                            'path': str(relative_path)
+                        })
+                    except Exception as e:
+                        logger.warning(f"Could not read file {file_path}: {e}")
+
+        return jsonify({
+            'success': True,
+            'build_id': build_id,
+            'files': files,
+            'count': len(files)
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting build files: {e}", exc_info=True)
+        return jsonify({
+            'error': str(e),
+            'code': 'ERROR'
+        }), 500
+
+
 @app.route('/builds', methods=['GET'])
 def list_builds():
     """
