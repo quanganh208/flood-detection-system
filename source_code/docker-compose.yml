@@ -12,14 +12,19 @@ services:
       - PORT=3000
       - MQTT_BROKER=mqtt://mosquitto:1883
       - PLATFORMIO_BUILDER_URL=http://platformio-builder:5000  # Internal Docker network uses port 5000
+      - DATABASE_URL=postgresql://flood_user:flood_password@postgres:5432/flood_detection?schema=public
     volumes:
       - ./server:/app
       - /app/node_modules
       - ./storage/firmware:/storage/firmware
       - ./storage/uploads:/storage/uploads
     depends_on:
-      - mosquitto
-      - platformio-builder
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+      platformio-builder:
+        condition: service_started
     networks:
       - flood-network
     restart: unless-stopped
@@ -38,6 +43,27 @@ services:
     networks:
       - flood-network
     restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: flood-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=flood_user
+      - POSTGRES_PASSWORD=flood_password
+      - POSTGRES_DB=flood_detection
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - flood-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flood_user -d flood_detection"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # MQTT Broker
   mosquitto:
@@ -60,3 +86,4 @@ networks:
 
 volumes:
   platformio-cache:
+  postgres-data:

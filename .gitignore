@@ -16,6 +16,7 @@ source_code/storage/uploads/*
 source_code/storage/builds/*
 source_code/storage/mosquitto/data/*
 source_code/storage/mosquitto/log/*
+source_code/storage/postgres/*
 
 # Keep directories
 !source_code/storage/firmware/.gitkeep

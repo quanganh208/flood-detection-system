@@ -1,0 +1,195 @@
+// Optimized Prisma Schema for Flood Detection System
+// Based on ACTUAL ESP32 hardware capabilities
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===== DEVICE MANAGEMENT =====
+
+model Device {
+  id                String      @id @default(uuid())
+  deviceId          String      @unique // Custom ID from ESP32 (e.g., "ESP32-Device-01")
+  name              String      // Display name
+  description       String?
+  location          String?     // Text location (e.g., "River X, District Y")
+  latitude          Float?      // GPS coordinate for map display
+  longitude         Float?      // GPS coordinate for map display
+
+  // Network info
+  macAddress        String      @unique
+  ipAddress         String?
+  wifiSSID          String?
+  rssi              Int?        // WiFi signal strength (dBm)
+
+  // Status
+  firmwareVersion   String      @default("1.0.0")
+  isOnline          Boolean     @default(false)
+  isActive          Boolean     @default(true)  // Manual enable/disable
+  lastHeartbeat     DateTime    @default(now())
+  uptime            Int         @default(0)     // Seconds
+
+  // Timestamps
+  registeredAt      DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  // Relations
+  sensorReadings    SensorReading[]
+  alerts            Alert[]
+  otaHistory        OTAHistory[]
+
+  @@index([deviceId])
+  @@index([macAddress])
+  @@index([isOnline, isActive])
+  @@index([lastHeartbeat])
+  @@index([latitude, longitude]) // For map queries
+  @@map("devices")
+}
+
+// ===== SENSOR DATA =====
+
+model SensorReading {
+  id              String      @id @default(uuid())
+
+  // ACTUAL sensor data from ESP32
+  rainAnalog      Int         // GPIO 34: 0-4095 (inverted: high=dry, low=wet)
+  rainDigital     Boolean     // GPIO 25: true=no rain, false=rain
+  waterLevel      Int         // GPIO 35: 0-4095
+
+  // Calculated status (based on hardcoded thresholds in ESP32)
+  rainStatus      RainStatus
+  waterStatus     WaterStatus
+
+  // Metadata
+  rssi            Int?        // WiFi signal when reading was taken
+  timestamp       DateTime    @default(now())
+
+  // Relation
+  device          Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId        String
+
+  @@index([deviceId, timestamp])
+  @@index([timestamp])
+  @@index([waterStatus])
+  @@map("sensor_readings")
+}
+
+// ===== ALERTS =====
+
+model Alert {
+  id              String          @id @default(uuid())
+  type            AlertType
+  severity        AlertSeverity
+  message         String
+
+  // Sensor values at alert time
+  waterLevel      Int?
+  rainAnalog      Int?
+
+  // Alert lifecycle
+  isResolved      Boolean         @default(false)
+  resolvedAt      DateTime?
+  createdAt       DateTime        @default(now())
+
+  // Relation
+  device          Device          @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId        String
+
+  @@index([deviceId, createdAt])
+  @@index([isResolved])
+  @@index([severity])
+  @@map("alerts")
+}
+
+// ===== OTA FIRMWARE =====
+
+model FirmwareVersion {
+  id              String        @id @default(uuid())
+  buildId         String        @unique
+  version         String        @unique
+  filePath        String
+  fileSize        Int
+  md5Checksum     String
+  releaseNotes    String?
+  isStable        Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+
+  // Relations
+  otaHistory      OTAHistory[]
+
+  @@index([version])
+  @@index([buildId])
+  @@map("firmware_versions")
+}
+
+model OTAHistory {
+  id              String          @id @default(uuid())
+  fromVersion     String
+  toVersion       String
+  status          OTAStatus
+  success         Boolean         @default(false)
+  errorMessage    String?
+  startedAt       DateTime        @default(now())
+  completedAt     DateTime?
+
+  // Relations
+  device          Device          @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId        String
+  firmware        FirmwareVersion @relation(fields: [firmwareId], references: [id])
+  firmwareId      String
+
+  @@index([deviceId, startedAt])
+  @@index([status])
+  @@map("ota_history")
+}
+
+// ===== ENUMS =====
+
+// Rain sensor (INVERTED: high value = dry, low value = wet)
+// Based on ESP32 hardcoded thresholds (line 100-103)
+enum RainStatus {
+  DRY           // rainAnalog >= 3000 (Khô ráo, không mưa hoặc mưa phùn)
+  LIGHT         // 2000 <= rainAnalog < 3000 (Mưa nhẹ đến vừa, bề mặt bắt đầu ẩm)
+  HEAVY         // rainAnalog < 2000 (Mưa to/lớn, bề mặt rất ướt)
+}
+
+// Water level for street flooding in Hanoi
+// Based on resistive/capacitive sensor (0-60cm range)
+// ADC 12-bit: 0-4095 maps to 0-60cm (1cm ≈ 68.25 ADC)
+// Research: 15cm moving water moves cars, 30cm loses traction, 60cm cars float
+enum WaterStatus {
+  SAFE          // 0-683 ADC (0-10cm): An toàn, xe cộ lưu thông bình thường
+  LOW           // 683-1365 ADC (10-20cm): Ngập nhẹ, xe máy cẩn thận, nước vào ống xả
+  WARNING       // 1365-2048 ADC (20-30cm): Xe máy khó đi, ô tô mất lực bám đường
+  DANGER        // 2048-3413 ADC (30-50cm): Hà Nội đóng đường, xe máy chết máy, ô tô unsafe
+  CRITICAL      // >3413 ADC (>50cm): Xe nhỏ bắt đầu nổi (~60cm), rất nguy hiểm
+}
+
+enum AlertType {
+  WATER_WARNING
+  WATER_DANGER
+  HEAVY_RAIN
+  DEVICE_OFFLINE
+  SENSOR_ERROR
+  OTA_FAILED
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum OTAStatus {
+  PENDING
+  DOWNLOADING
+  INSTALLING
+  SUCCESS
+  FAILED
+}

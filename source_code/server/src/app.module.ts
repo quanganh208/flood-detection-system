@@ -4,6 +4,7 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { FirmwareModule } from './modules/firmware/firmware.module';
 import { OtaModule } from './modules/ota/ota.module';
+import { PrismaModule } from './modules/prisma/prisma.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { OtaModule } from './modules/ota/ota.module';
       exclude: ['/api*'],
     }),
 
+    PrismaModule,
     FirmwareModule,
     OtaModule,
   ],
