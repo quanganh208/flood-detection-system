@@ -1,11 +1,17 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class VerifyUpdateDto {
-  @ApiProperty({
-    description: 'Build identifier of the firmware that was updated',
+  @ApiPropertyOptional({
+    description: 'Build identifier of the firmware (legacy field)',
     example: 'abc123-def456-ghi789',
   })
-  buildId: string;
+  buildId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Firmware version (preferred over buildId)',
+    example: '1.2.0',
+  })
+  version?: string;
 
   @ApiProperty({
     description: 'Update status - whether the OTA update succeeded or failed',
@@ -14,10 +20,33 @@ export class VerifyUpdateDto {
   })
   status: 'success' | 'failed';
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Error message if the update failed',
     example: 'Flash write error',
-    required: false,
   })
   errorMessage?: string;
+
+  @ApiPropertyOptional({
+    description: 'Full MAC address with colons',
+    example: 'AA:BB:CC:DD:EE:FF',
+  })
+  mac?: string;
+
+  @ApiPropertyOptional({
+    description: 'Display name configured on the device',
+    example: 'Sensor-Garden',
+  })
+  displayName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Current IP address of the device',
+    example: '192.168.1.100',
+  })
+  ip?: string;
+
+  @ApiPropertyOptional({
+    description: 'WiFi signal strength in dBm',
+    example: -65,
+  })
+  rssi?: number;
 }

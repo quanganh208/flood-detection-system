@@ -2,14 +2,14 @@ import { Injectable, BadRequestException, NotFoundException, Logger } from '@nes
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as crypto from 'crypto';
 import { Observable } from 'rxjs';
 import { v4 as uuidv4 } from 'uuid';
 import { BuildStreamService, SseMessage } from './services/build-stream.service';
 import { BuildStateService, BuildState } from './services/build-state.service';
 import { PlatformIOClientService } from './services/platformio-client.service';
-import { BuildStatus, BuildStatusResponse } from './dto/build-response.dto';
+import { BuildStatus } from './dto/build-response.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { calculateMD5 } from '../../common/utils';
 
 @Injectable()
 export class FirmwareService {
@@ -82,7 +82,7 @@ export class FirmwareService {
 
         if (fs.existsSync(firmwarePath)) {
           const fileStats = fs.statSync(firmwarePath);
-          const md5Checksum = this.calculateMD5(firmwarePath);
+          const md5Checksum = calculateMD5(firmwarePath);
 
           await this.prisma.firmware.updateMany({
             where: { isLatest: true },
@@ -126,13 +126,6 @@ export class FirmwareService {
         `Failed to update firmware ${state.buildId} from build state: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-  }
-
-  private calculateMD5(filePath: string): string {
-    const fileBuffer = fs.readFileSync(filePath);
-    const hash = crypto.createHash('md5');
-    hash.update(fileBuffer);
-    return hash.digest('hex');
   }
 
   getFirmwarePath(buildId: string): string {
@@ -277,106 +270,138 @@ export class FirmwareService {
 
     const buildId = uuidv4();
 
-    const fileNames = files.map((f) => f.originalname);
-    const platformioIniFile = files.find((f) => f.originalname === 'platformio.ini');
-    const platformioIniContent = platformioIniFile?.buffer.toString('utf-8');
-
-    const sourceFileContents = files.map((file) => ({
-      name: file.originalname,
-      content: file.buffer.toString('utf-8'),
-      path: file.originalname === 'platformio.ini' ? 'platformio.ini' : `src/${file.originalname}`,
-    }));
-
-    void this.createFirmwareRecord(buildId, fileNames, platformioIniContent, sourceFileContents);
-
-    this.buildStateService.setState(buildId, {
-      buildId,
-      status: BuildStatus.QUEUED,
-      percent: 0,
-      fileCount: files.length,
-      queuePosition: 0,
-    });
-
-    void this.platformIOClient.startBuild(buildId, files).catch((error: Error) => {
-      this.logger.error(`Failed to start build ${buildId}: ${error.message}`);
-    });
+    void this.startBuildWithAutoVersion(buildId, files);
 
     return buildId;
   }
 
-  private extractVersionFromPlatformIO(configContent?: string): string {
-    if (!configContent) {
-      return '0.0.0';
-    }
-
-    const customVersionMatch = configContent.match(/custom_firmware_version\s*=\s*([^\s\n]+)/i);
-    if (customVersionMatch) {
-      return customVersionMatch[1].trim();
-    }
-
-    const buildFlagMatch = configContent.match(/-DFIRMWARE_VERSION[=\\]"([^"]+)"/i);
-    if (buildFlagMatch) {
-      return buildFlagMatch[1].trim();
-    }
-
-    const versionFlagMatch = configContent.match(/-DVERSION[=\\]"([^"]+)"/i);
-    if (versionFlagMatch) {
-      return versionFlagMatch[1].trim();
-    }
-
-    return '0.0.0';
-  }
-
-  private async createFirmwareRecord(
+  private async startBuildWithAutoVersion(
     buildId: string,
-    fileNames: string[],
-    configFile?: string,
-    sourceFileContents?: Array<{ name: string; content: string; path: string }>,
+    files: Express.Multer.File[],
   ): Promise<void> {
     try {
-      const version = this.extractVersionFromPlatformIO(configFile);
+      const fileNames = files.map((f) => f.originalname);
+
+      const newVersion = await this.getNextVersion();
+
+      this.logger.log(`Auto-generated version: ${newVersion}`);
+
+      const modifiedFiles = files.map((file) => {
+        if (file.originalname === 'platformio.ini') {
+          const modifiedContent = this.injectVersionIntoPlatformIO(
+            file.buffer.toString('utf-8'),
+            newVersion,
+          );
+          return {
+            ...file,
+            buffer: Buffer.from(modifiedContent, 'utf-8'),
+          } as Express.Multer.File;
+        }
+        return file;
+      });
+
+      const modifiedPlatformioIni = modifiedFiles
+        .find((f) => f.originalname === 'platformio.ini')
+        ?.buffer.toString('utf-8');
+
+      const sourceFileContents = modifiedFiles.map((file) => ({
+        name: file.originalname,
+        content: file.buffer.toString('utf-8'),
+        path:
+          file.originalname === 'platformio.ini' ? 'platformio.ini' : `src/${file.originalname}`,
+      }));
 
       await this.prisma.firmware.create({
         data: {
           buildId,
-          version: version,
+          version: newVersion,
           sourceFiles: fileNames,
-          sourceFileContents: sourceFileContents || [],
-          configFile: configFile,
+          sourceFileContents: sourceFileContents,
+          configFile: modifiedPlatformioIni,
           buildStatus: BuildStatus.PENDING,
           filePath: path.join(this.firmwareStorageDir, `${buildId}.bin`),
           fileSize: 0,
           md5Checksum: '',
         },
       });
+
+      this.buildStateService.setState(buildId, {
+        buildId,
+        status: BuildStatus.QUEUED,
+        percent: 0,
+        fileCount: files.length,
+        queuePosition: 0,
+      });
+
+      await this.platformIOClient.startBuild(buildId, modifiedFiles);
     } catch (error) {
       this.logger.error(
-        `Failed to create firmware record: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to start build ${buildId}: ${error instanceof Error ? error.message : String(error)}`,
       );
+      this.buildStateService.setState(buildId, {
+        buildId,
+        status: BuildStatus.FAILED,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
+  }
+
+  private injectVersionIntoPlatformIO(content: string, version: string): string {
+    let result = content;
+
+    if (result.match(/custom_firmware_version\s*=/i)) {
+      result = result.replace(
+        /custom_firmware_version\s*=\s*[^\s\n]+/i,
+        `custom_firmware_version = ${version}`,
+      );
+    } else {
+      const envMatch = result.match(/(\[env:[^\]]+\])/);
+      if (envMatch) {
+        result = result.replace(
+          envMatch[1],
+          `${envMatch[1]}\ncustom_firmware_version = ${version}`,
+        );
+      }
+    }
+
+    const versionFlag = `-DFIRMWARE_VERSION=\\"${version}\\"`;
+
+    if (result.match(/-DFIRMWARE_VERSION/i)) {
+      result = result.replace(/-DFIRMWARE_VERSION[^\s\n]*/i, versionFlag);
+    } else if (result.match(/build_flags\s*=/i)) {
+      result = result.replace(/(build_flags\s*=)/i, `$1\n    ${versionFlag}`);
+    } else {
+      const envMatch = result.match(/(\[env:[^\]]+\])/);
+      if (envMatch) {
+        result = result.replace(envMatch[1], `${envMatch[1]}\nbuild_flags =\n    ${versionFlag}`);
+      }
+    }
+
+    return result;
+  }
+
+  private async getNextVersion(): Promise<string> {
+    const latestFirmware = await this.prisma.firmware.findFirst({
+      where: { buildStatus: 'COMPLETED' },
+      orderBy: { createdAt: 'desc' },
+      select: { version: true },
+    });
+
+    if (!latestFirmware?.version) {
+      return '1.0.0';
+    }
+
+    const parts = latestFirmware.version.split('.').map(Number);
+    if (parts.length === 3 && parts.every((p) => !isNaN(p))) {
+      parts[2] += 1;
+      return parts.join('.');
+    }
+
+    return '1.0.0';
   }
 
   getBuildStream(buildId: string, lastEventId?: number): Observable<SseMessage> {
     return this.buildStreamService.getBuildStream(buildId, lastEventId);
-  }
-
-  getBuildStatus(buildId: string): BuildStatusResponse {
-    const state = this.buildStateService.getState(buildId);
-
-    if (!state) {
-      throw new NotFoundException(`Build ${buildId} not found`);
-    }
-
-    return {
-      buildId: state.buildId,
-      status: state.status,
-      stage: state.stage,
-      percent: state.percent,
-      startedAt: state.startedAt?.toISOString(),
-      completedAt: state.completedAt?.toISOString(),
-      duration: state.duration,
-      error: state.error,
-    };
   }
 
   async cancelBuild(buildId: string): Promise<void> {

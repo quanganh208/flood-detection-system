@@ -1,15 +1,24 @@
 /*
  * ===== ESP32 FLOOD DETECTION SYSTEM =====
- * Hệ thống cảnh báo lũ lụt với WiFi non-blocking + OTA Update
+ * Hệ thống cảnh báo lũ lụt với WiFi + MQTT + OTA Update
  *
  * TÍNH NĂNG:
  * - Đọc cảm biến mưa (analog + digital)
  * - Đọc cảm biến mực nước (analog)
- * - Cảnh báo nguy hiểm khi vượt ngưỡng
- * - Gửi data lên server (khi có WiFi)
- * - Lưu data local (khi mất WiFi)
+ * - Gửi data qua MQTT (lightweight, realtime)
+ * - OTA Update qua HTTP
  * - NON-BLOCKING: Luôn hoạt động dù có/không WiFi
- * - OTA UPDATE: Tự động cập nhật firmware qua WiFi
+ *
+ * MQTT TOPICS:
+ * - flood/{deviceId}/sensor  - Publish sensor data
+ * - flood/{deviceId}/status  - Publish online/offline status
+ * - flood/{deviceId}/config  - Subscribe to config updates
+ * - flood/{deviceId}/ota     - Subscribe to OTA notifications
+ * - flood/broadcast/ota      - Subscribe to broadcast OTA
+ *
+ * DEVICE IDENTITY:
+ * - Device ID: MAC Address (hardware-level, unique, OTA-safe)
+ * - Display Name: User configurable (stored in NVS, survives OTA)
  *
  * CHÂN CẢM BIẾN:
  * - GPIO 34: Cảm biến mưa AO (analog)
@@ -17,90 +26,89 @@
  * - GPIO 35: Cảm biến mực nước (analog)
  * - GPIO 2:  LED status
  *
- * CẤU HÌNH WIFI:
- * 1. Upload code lên ESP32
- * 2. ESP32 tạo WiFi AP: "ESP32-WiFi-Setup"
- * 3. Kết nối vào WiFi này → Trình duyệt tự mở
- * 4. Chọn WiFi và nhập password → Save
- * 5. ESP32 tự động kết nối
- *
- * QUẢN LÝ:
- * - Reset WiFi: Gõ "reset" trong Serial Monitor
- * - Mở portal: Gõ "config"
- * - Xem trạng thái: Gõ "status"
- * - Check OTA: Gõ "ota"
- * - Hoặc nhấn giữ nút BOOT 3-5 giây
- *
  * THƯ VIỆN CẦN THIẾT:
  * - WiFiManager by tzapu (v2.0.17+)
  * - ArduinoJson (v7.0.0+)
- * - HTTPClient (built-in ESP32)
- *
- * Arduino IDE: Tools → Manage Libraries → "WiFiManager", "ArduinoJson"
- * PlatformIO: lib_deps =
- *   tzapu/WiFiManager @ ^2.0.17
- *   bblanchon/ArduinoJson @ ^7.0.0
+ * - PubSubClient (v2.8+)
  */
 
 #include <WiFi.h>
-#include <WiFiManager.h>  // https://github.com/tzapu/WiFiManager
+#include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <Update.h>
 #include <ArduinoJson.h>
-#include <Preferences.h>  // Lưu build ID persistent
+#include <Preferences.h>
+#include <PubSubClient.h>
 
-// LED Status
-const int LED_PIN = 2;  // GPIO2 - LED built-in
+// ===== PIN DEFINITIONS =====
+const int LED_PIN = 2;
+const int RESET_BUTTON = 0;
+const int RAIN_AO_PIN = 34;
+const int RAIN_DO_PIN = 25;
+const int WATER_AO_PIN = 35;
 
-// Nút reset cấu hình WiFi
-const int RESET_BUTTON = 0;  // GPIO0 - Nút BOOT trên hầu hết ESP32
+// ===== THRESHOLDS =====
+const int WATER_WARNING_LEVEL = 2000;
+const int WATER_DANGER_LEVEL = 3000;
+const int RAIN_DRY_THRESHOLD = 3000;
+const int RAIN_WARNING_THRESHOLD = 2000;
 
-// WiFiManager instance
+// ===== TIMING =====
+const int CONFIG_PORTAL_TIMEOUT = 180;
+const unsigned long WIFI_RECONNECT_INTERVAL = 30000;
+const unsigned long MQTT_RECONNECT_INTERVAL = 5000;
+const unsigned long OTA_CHECK_INTERVAL = 60000;
+const unsigned long SENSOR_READ_INTERVAL = 2000;
+const unsigned long STATUS_PRINT_INTERVAL = 30000;
+
+// ===== INSTANCES =====
 WiFiManager wm;
-
-// Preferences instance (lưu build ID)
 Preferences preferences;
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
 
-// Timeout cho config portal (giây)
-const int CONFIG_PORTAL_TIMEOUT = 180;  // 3 phút
+// ===== DEVICE IDENTITY =====
+String DEVICE_MAC = "";
+String DEVICE_ID = "";
+String DISPLAY_NAME = "";
+String SERVER_URL = "";
+String MQTT_SERVER = "";
+int MQTT_PORT = 1883;
 
-// Thời gian thử reconnect WiFi (ms)
-const unsigned long WIFI_RECONNECT_INTERVAL = 30000;  // 30 giây
+// Firmware version - injected from platformio.ini via build flag
+#ifndef FIRMWARE_VERSION
+  #define FIRMWARE_VERSION "1.0.0"  // Fallback for Arduino IDE
+#endif
+String CURRENT_FIRMWARE_VERSION = FIRMWARE_VERSION;
 
-// Custom parameters (nếu cần thêm cấu hình khác)
-WiFiManagerParameter custom_device_name("device_name", "Tên thiết bị", "ESP32-Device-01", 40);
-WiFiManagerParameter custom_server_url("server", "Server URL", "http://192.168.1.19:3000", 100);
+// Default values
+const char* DEFAULT_SERVER_URL = "https://38btvhxs-3000.asse.devtunnels.ms";
+const char* DEFAULT_MQTT_SERVER = "192.168.1.42";
+const char* DEFAULT_DISPLAY_NAME = "Unnamed Device";
 
-// Biến trạng thái WiFi
+// WiFiManager parameters
+WiFiManagerParameter custom_display_name("display_name", "Ten thiet bi", "", 40);
+WiFiManagerParameter custom_server_url("server", "Server URL", "", 100);
+WiFiManagerParameter custom_mqtt_server("mqtt", "MQTT Server IP", "", 40);
+
+// ===== STATE VARIABLES =====
 bool wasConnected = false;
+bool mqttWasConnected = false;
 unsigned long lastReconnectAttempt = 0;
+unsigned long lastMqttReconnect = 0;
 unsigned long wifiDisconnectedTime = 0;
-
-// ===== CẤU HÌNH OTA UPDATE =====
-String CURRENT_FIRMWARE_VERSION = "1.0.0";  // Version mặc định, sẽ load từ Preferences
-String OTA_SERVER_URL = "";       // Sẽ lấy từ custom_server_url
-String DEVICE_ID = "";            // Sẽ lấy từ custom_device_name
-
-// Thời gian check OTA update (ms)
-const unsigned long OTA_CHECK_INTERVAL = 60000;  // 60 giây
 unsigned long lastOTACheck = 0;
+unsigned long lastSensorRead = 0;
+unsigned long lastStatusPrint = 0;
 
-// ===== CẤU HÌNH SENSOR =====
-// Chân cảm biến mưa
-const int RAIN_AO_PIN = 34;   // AO cảm biến mưa (analog output)
-const int RAIN_DO_PIN = 25;   // DO cảm biến mưa (digital output)
+// ===== MQTT TOPICS =====
+String topicSensor;
+String topicStatus;
+String topicConfig;
+String topicOta;
+String topicBroadcastOta;
 
-// Chân cảm biến mực nước
-const int WATER_AO_PIN = 35;  // S cảm biến mực nước (analog)
-
-// Ngưỡng cảnh báo
-const int WATER_WARNING_LEVEL = 2000;   // Mực nước cảnh báo (0-4095)
-const int WATER_DANGER_LEVEL = 3000;    // Mực nước nguy hiểm (0-4095)
-
-// QUAN TRỌNG: Cảm biến mưa hoạt động NGƯỢC
-// Khô ráo = 4095 (cao), Ướt (mưa) = 0 (thấp)
-const int RAIN_DRY_THRESHOLD = 3000;      // > 3000 = Khô ráo
-const int RAIN_WARNING_THRESHOLD = 2000;  // < 2000 = Mưa lớn
+// ===== HELPER FUNCTIONS =====
 
 void blinkLED(int times, int delayMs = 200) {
   for (int i = 0; i < times; i++) {
@@ -111,217 +119,353 @@ void blinkLED(int times, int delayMs = 200) {
   }
 }
 
-// Callback khi vào config mode
-void configModeCallback(WiFiManager *myWiFiManager) {
-  Serial.println("\n========================================");
-  Serial.println("     CHƯA KẾT NỐI WIFI - CONFIG MODE");
-  Serial.println("========================================");
-  Serial.print("SSID AP: ");
-  Serial.println(myWiFiManager->getConfigPortalSSID());
-  Serial.print("IP Config Portal: ");
-  Serial.println(WiFi.softAPIP());
-  Serial.println("\nHƯỚNG DẪN:");
-  Serial.println("1. Kết nối WiFi: " + myWiFiManager->getConfigPortalSSID());
-  Serial.println("2. Trình duyệt tự mở (hoặc vào 192.168.4.1)");
-  Serial.println("3. Chọn WiFi và nhập mật khẩu");
-  Serial.println("========================================\n");
-
-  // LED nhấp nháy nhanh khi ở config mode
-  blinkLED(3, 100);
+String getMacAddressClean() {
+  String mac = WiFi.macAddress();
+  mac.replace(":", "");
+  return mac;
 }
 
-// Callback khi lưu cấu hình
-void saveConfigCallback() {
-  Serial.println("\n✓ Đã lưu cấu hình WiFi!");
+String getMacSuffix() {
+  String mac = getMacAddressClean();
+  return mac.substring(mac.length() - 6);
+}
 
-  // Lấy custom parameters
-  Serial.println("\n----- Custom Parameters -----");
-  Serial.print("Device Name: ");
-  Serial.println(custom_device_name.getValue());
+void setupTopics() {
+  topicSensor = "flood/" + DEVICE_ID + "/sensor";
+  topicStatus = "flood/" + DEVICE_ID + "/status";
+  topicConfig = "flood/" + DEVICE_ID + "/config";
+  topicOta = "flood/" + DEVICE_ID + "/ota";
+  topicBroadcastOta = "flood/broadcast/ota";
+}
+
+// ===== NVS FUNCTIONS =====
+
+void loadDeviceConfig() {
+  preferences.begin("device", true);
+  DISPLAY_NAME = preferences.getString("display_name", DEFAULT_DISPLAY_NAME);
+  SERVER_URL = preferences.getString("server_url", DEFAULT_SERVER_URL);
+  MQTT_SERVER = preferences.getString("mqtt_server", DEFAULT_MQTT_SERVER);
+  MQTT_PORT = preferences.getInt("mqtt_port", 1883);
+  // Note: CURRENT_FIRMWARE_VERSION is from build flag, NOT from NVS
+  // NVS version is only used to track what was last installed for OTA comparison
+  preferences.end();
+
+  Serial.println("\n----- Config from NVS -----");
+  Serial.print("Display Name: ");
+  Serial.println(DISPLAY_NAME);
   Serial.print("Server URL: ");
-  Serial.println(custom_server_url.getValue());
-  Serial.println("-----------------------------\n");
-
-  // TODO: Lưu custom parameters vào SPIFFS/LittleFS nếu cần
-
-  blinkLED(5, 100);
+  Serial.println(SERVER_URL);
+  Serial.print("MQTT Server: ");
+  Serial.print(MQTT_SERVER);
+  Serial.print(":");
+  Serial.println(MQTT_PORT);
+  Serial.print("Firmware (build): ");
+  Serial.println(CURRENT_FIRMWARE_VERSION);
+  Serial.println("---------------------------\n");
 }
 
-// Callback khi kết nối WiFi thành công
-void saveParamCallback() {
-  Serial.println("\n✓ Tham số đã được lưu!");
+void saveDeviceConfig() {
+  preferences.begin("device", false);
+  preferences.putString("display_name", DISPLAY_NAME);
+  preferences.putString("server_url", SERVER_URL);
+  preferences.putString("mqtt_server", MQTT_SERVER);
+  preferences.putInt("mqtt_port", MQTT_PORT);
+  preferences.end();
+  Serial.println("Config saved to NVS");
 }
 
-void checkResetButton() {
-  // Kiểm tra nút reset
-  if (digitalRead(RESET_BUTTON) == LOW) {
-    Serial.println("\n[!] Đang nhấn nút RESET...");
-    delay(5000);  // Chờ 5 giây
+void saveFirmwareVersion(String version) {
+  preferences.begin("device", false);
+  preferences.putString("fw_version", version);
+  preferences.end();
+  CURRENT_FIRMWARE_VERSION = version;
+}
 
-    if (digitalRead(RESET_BUTTON) == LOW) {
-      Serial.println("\n========================================");
-      Serial.println("     XÓA CẤU HÌNH WIFI ĐÃ LƯU");
-      Serial.println("========================================");
+// ===== MQTT FUNCTIONS =====
 
-      wm.resetSettings();  // Xóa WiFi đã lưu
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  String message;
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
 
-      Serial.println("✓ Đã xóa cấu hình!");
-      Serial.println("ESP32 sẽ khởi động lại...\n");
+  Serial.print("\n[MQTT] Received on ");
+  Serial.print(topic);
+  Serial.print(": ");
+  Serial.println(message);
 
-      delay(3000);
-      ESP.restart();
-    }
+  // Handle OTA notification
+  if (String(topic) == topicOta || String(topic) == topicBroadcastOta) {
+    handleOtaNotification(message);
+  }
+  // Handle config update
+  else if (String(topic) == topicConfig) {
+    handleConfigUpdate(message);
   }
 }
 
-// ===== OTA UPDATE FUNCTIONS =====
+void handleOtaNotification(String message) {
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, message);
 
-/**
- * Check xem có firmware update mới không
- */
-bool checkForOTAUpdate() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("⚠️  Không có WiFi, bỏ qua OTA check");
+  if (error) {
+    Serial.print("JSON parse error: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  bool available = doc["available"];
+  if (available) {
+    String version = doc["version"].as<String>();
+    String url = doc["url"].as<String>();
+    int size = doc["size"];
+    String md5 = doc["md5"].as<String>();
+
+    Serial.println("\n[MQTT] OTA Update available!");
+    Serial.print("Version: ");
+    Serial.println(version);
+
+    // Trigger OTA update
+    performOTAUpdate(url, size, md5, version);
+  }
+}
+
+void handleConfigUpdate(String message) {
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, message);
+
+  if (error) return;
+
+  // Update config if provided
+  if (doc.containsKey("sensorInterval")) {
+    // Could update sensor interval dynamically
+    Serial.print("Config update - sensorInterval: ");
+    Serial.println(doc["sensorInterval"].as<int>());
+  }
+}
+
+bool connectMqtt() {
+  if (mqttClient.connected()) return true;
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  unsigned long now = millis();
+  if (now - lastMqttReconnect < MQTT_RECONNECT_INTERVAL) return false;
+  lastMqttReconnect = now;
+
+  Serial.print("[MQTT] Connecting to ");
+  Serial.print(MQTT_SERVER);
+  Serial.print(":");
+  Serial.print(MQTT_PORT);
+  Serial.print("...");
+
+  String clientId = "ESP32-" + DEVICE_ID;
+
+  // LWT (Last Will and Testament) - publish offline when disconnected
+  String willTopic = topicStatus;
+  String willMessage = "{\"status\":\"offline\",\"deviceId\":\"" + DEVICE_ID + "\"}";
+
+  if (mqttClient.connect(clientId.c_str(), NULL, NULL, willTopic.c_str(), 1, true, willMessage.c_str())) {
+    Serial.println(" Connected!");
+
+    // Subscribe to topics
+    mqttClient.subscribe(topicConfig.c_str());
+    mqttClient.subscribe(topicOta.c_str());
+    mqttClient.subscribe(topicBroadcastOta.c_str());
+
+    Serial.println("[MQTT] Subscribed to:");
+    Serial.println("  - " + topicConfig);
+    Serial.println("  - " + topicOta);
+    Serial.println("  - " + topicBroadcastOta);
+
+    // Publish online status
+    publishStatus("online");
+
+    mqttWasConnected = true;
+    return true;
+  } else {
+    Serial.print(" Failed, rc=");
+    Serial.println(mqttClient.state());
     return false;
   }
+}
 
-  Serial.println("\n========== KIỂM TRA OTA UPDATE ==========");
-  Serial.print("Device ID: ");
-  Serial.println(DEVICE_ID);
-  Serial.print("Current Version: ");
-  Serial.println(CURRENT_FIRMWARE_VERSION);
+void publishStatus(const char* status) {
+  if (!mqttClient.connected()) return;
+
+  JsonDocument doc;
+  doc["status"] = status;
+  doc["deviceId"] = DEVICE_ID;
+  doc["mac"] = DEVICE_MAC;
+  doc["displayName"] = DISPLAY_NAME;
+  doc["ip"] = WiFi.localIP().toString();
+  doc["wifiSSID"] = WiFi.SSID();
+  doc["rssi"] = WiFi.RSSI();
+  doc["firmwareVersion"] = CURRENT_FIRMWARE_VERSION;
+  doc["uptime"] = millis() / 1000;
+  // Hardware info
+  doc["chipModel"] = ESP.getChipModel();
+  doc["freeHeap"] = ESP.getFreeHeap();
+  doc["flashSize"] = ESP.getFlashChipSize();
+
+  String message;
+  serializeJson(doc, message);
+
+  mqttClient.publish(topicStatus.c_str(), message.c_str(), true);  // retained
+  Serial.print("[MQTT] Published status: ");
+  Serial.println(status);
+}
+
+void publishSensorData(int rainAnalog, bool rainDigital, int waterLevel) {
+  if (!mqttClient.connected()) return;
+
+  JsonDocument doc;
+  doc["deviceId"] = DEVICE_ID;
+  doc["mac"] = DEVICE_MAC;
+  doc["displayName"] = DISPLAY_NAME;
+  doc["rainAnalog"] = rainAnalog;
+  doc["rainDigital"] = rainDigital;
+  doc["waterLevel"] = waterLevel;
+  doc["rssi"] = WiFi.RSSI();
+  doc["ip"] = WiFi.localIP().toString();
+  doc["firmwareVersion"] = CURRENT_FIRMWARE_VERSION;
+  doc["uptime"] = millis() / 1000;
+
+  String message;
+  serializeJson(doc, message);
+
+  if (mqttClient.publish(topicSensor.c_str(), message.c_str())) {
+    Serial.println("[MQTT] Sensor data published");
+  } else {
+    Serial.println("[MQTT] Publish failed!");
+  }
+}
+
+// ===== OTA FUNCTIONS =====
+
+String urlEncode(const String& str) {
+  String encoded = "";
+  char c;
+  for (int i = 0; i < str.length(); i++) {
+    c = str.charAt(i);
+    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      encoded += c;
+    } else if (c == ' ') {
+      encoded += "%20";
+    } else {
+      char buf[4];
+      sprintf(buf, "%%%02X", (unsigned char)c);
+      encoded += buf;
+    }
+  }
+  return encoded;
+}
+
+bool checkForOTAUpdate() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  Serial.println("\n========== OTA CHECK ==========");
 
   HTTPClient http;
-  String url = OTA_SERVER_URL + "/api/ota/check/" + DEVICE_ID + "?version=" + CURRENT_FIRMWARE_VERSION;
+  String url = SERVER_URL + "/api/ota/check/" + DEVICE_ID;
+  url += "?version=" + urlEncode(CURRENT_FIRMWARE_VERSION);
+  url += "&mac=" + urlEncode(DEVICE_MAC);
+  url += "&name=" + urlEncode(DISPLAY_NAME);
+  url += "&rssi=" + String(WiFi.RSSI());
+  url += "&ip=" + WiFi.localIP().toString();
 
-  Serial.print("Đang check: ");
+  Serial.print("URL: ");
   Serial.println(url);
 
   http.begin(url);
-  http.setTimeout(10000);  // Timeout 10s
+  http.setTimeout(10000);
 
   int httpCode = http.GET();
+  Serial.print("HTTP Code: ");
+  Serial.println(httpCode);
 
   if (httpCode == 200) {
     String payload = http.getString();
-    Serial.println("Response:");
-    Serial.println(payload);
+    Serial.print("Response: ");
+    Serial.println(payload.substring(0, 200));  // Print first 200 chars
 
-    // Parse JSON
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload);
 
     if (error) {
-      Serial.print("❌ JSON parse error: ");
+      Serial.print("JSON Error: ");
       Serial.println(error.c_str());
-      http.end();
-      return false;
-    }
-
-    bool available = doc["data"]["available"];
-
-    if (available) {
-      String newVersion = doc["data"]["version"].as<String>();
-      String downloadUrl = doc["data"]["url"].as<String>();
-      int firmwareSize = doc["data"]["size"];
-      String md5 = doc["data"]["md5"].as<String>();
-
-      Serial.println("\n✅ CÓ UPDATE MỚI!");
-      Serial.print("   New Version: ");
-      Serial.println(newVersion);
-      Serial.print("   Size: ");
-      Serial.print(firmwareSize);
-      Serial.println(" bytes");
-      Serial.print("   MD5: ");
-      Serial.println(md5);
-      Serial.println("=========================================\n");
-
-      http.end();
-
-      // Thực hiện OTA update
-      return performOTAUpdate(downloadUrl, firmwareSize, md5, newVersion);
-
     } else {
-      Serial.println("✓ Đã là version mới nhất");
-      Serial.println("=========================================\n");
-      http.end();
-      return false;
-    }
+      bool available = doc["data"]["available"];
+      Serial.print("Available: ");
+      Serial.println(available ? "YES" : "NO");
 
+      if (available) {
+        String version = doc["data"]["version"].as<String>();
+        String downloadUrl = doc["data"]["url"].as<String>();
+        int size = doc["data"]["size"];
+        String md5 = doc["data"]["md5"].as<String>();
+
+        Serial.println("Update available: " + version);
+        http.end();
+        return performOTAUpdate(downloadUrl, size, md5, version);
+      }
+    }
   } else {
-    Serial.print("❌ HTTP Error: ");
-    Serial.println(httpCode);
-    Serial.println("=========================================\n");
-    http.end();
-    return false;
+    Serial.print("HTTP Error: ");
+    Serial.println(http.errorToString(httpCode));
   }
+
+  Serial.println("Already up to date");
+  Serial.println("===============================\n");
+  http.end();
+  return false;
 }
 
-/**
- * Download và cài đặt firmware mới
- */
 bool performOTAUpdate(String downloadUrl, int firmwareSize, String expectedMD5, String newVersion) {
-  Serial.println("\n========== BẮT ĐẦU OTA UPDATE ==========");
+  Serial.println("\n========== OTA UPDATE ==========");
 
   HTTPClient http;
-  String fullUrl = OTA_SERVER_URL + downloadUrl;
+  String fullUrl = SERVER_URL + downloadUrl;
 
-  Serial.print("Downloading từ: ");
+  Serial.print("Downloading: ");
   Serial.println(fullUrl);
 
   http.begin(fullUrl);
-  http.setTimeout(30000);  // Timeout 30s
+  http.setTimeout(30000);
 
   int httpCode = http.GET();
 
   if (httpCode != 200) {
-    Serial.print("❌ Download failed: HTTP ");
+    Serial.print("Download failed: ");
     Serial.println(httpCode);
     http.end();
     return false;
   }
 
   int contentLength = http.getSize();
-  Serial.print("Firmware size: ");
-  Serial.print(contentLength);
-  Serial.println(" bytes");
 
-  // Bắt đầu OTA update
   if (!Update.begin(contentLength)) {
-    Serial.println("❌ Không đủ bộ nhớ để update!");
+    Serial.println("Not enough space!");
     http.end();
     return false;
   }
 
-  // LED nhấp nháy nhanh khi đang update
-  digitalWrite(LED_PIN, HIGH);
-
-  // Download và ghi firmware
-  WiFiClient *stream = http.getStreamPtr();
+  WiFiClient* stream = http.getStreamPtr();
   size_t written = 0;
   uint8_t buff[128] = { 0 };
-  int lastProgress = -1;
-
-  Serial.println("\nĐang tải firmware...");
 
   while (http.connected() && (written < contentLength)) {
     size_t available = stream->available();
-
     if (available) {
-      int bytesRead = stream->readBytes(buff, ((available > sizeof(buff)) ? sizeof(buff) : available));
-
+      int bytesRead = stream->readBytes(buff, min(available, sizeof(buff)));
       if (bytesRead > 0) {
         Update.write(buff, bytesRead);
         written += bytesRead;
 
-        // Hiển thị progress
         int progress = (written * 100) / contentLength;
-        if (progress != lastProgress && progress % 10 == 0) {
+        if (progress % 20 == 0) {
           Serial.print(progress);
           Serial.println("%");
-          lastProgress = progress;
-
-          // Blink LED
           digitalWrite(LED_PIN, !digitalRead(LED_PIN));
         }
       }
@@ -329,586 +473,348 @@ bool performOTAUpdate(String downloadUrl, int firmwareSize, String expectedMD5, 
     delay(1);
   }
 
-  Serial.println("100%");
-  Serial.println("\n✓ Download hoàn tất!");
-
   http.end();
 
-  // Kết thúc update
-  if (Update.end()) {
-    if (Update.isFinished()) {
-      Serial.println("✅ OTA UPDATE THÀNH CÔNG!");
-      Serial.print("   New version: ");
-      Serial.println(newVersion);
-      Serial.println("=========================================");
-
-      // Lưu version mới vào Preferences
-      preferences.begin("ota", false);
-      preferences.putString("fw_version", newVersion);
-      preferences.end();
-      Serial.println("✓ Đã lưu version mới vào bộ nhớ");
-
-      // Thông báo server về update thành công
-      confirmOTASuccess(newVersion);
-
-      Serial.println("\n🔄 Khởi động lại sau 3 giây...\n");
-      delay(3000);
-      ESP.restart();
-
-      return true;
-
-    } else {
-      Serial.println("❌ Update không hoàn tất!");
-      return false;
-    }
-  } else {
-    Serial.print("❌ Update Error: ");
-    Serial.println(Update.getError());
-    return false;
+  if (Update.end() && Update.isFinished()) {
+    Serial.println("OTA SUCCESS!");
+    saveFirmwareVersion(newVersion);
+    confirmOTASuccess(newVersion);
+    Serial.println("Restarting in 3s...");
+    delay(3000);
+    ESP.restart();
+    return true;
   }
+
+  Serial.print("OTA Error: ");
+  Serial.println(Update.getError());
+  return false;
 }
 
-/**
- * Xác nhận với server rằng OTA đã thành công
- */
-void confirmOTASuccess(String buildId) {
+void confirmOTASuccess(String newVersion) {
   if (WiFi.status() != WL_CONNECTED) return;
 
   HTTPClient http;
-  String url = OTA_SERVER_URL + "/api/ota/verify/" + DEVICE_ID;
+  String url = SERVER_URL + "/api/ota/verify/" + DEVICE_ID;
 
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
 
-  String jsonData = "{\"buildId\":\"" + buildId + "\",\"status\":\"success\"}";
+  JsonDocument doc;
+  doc["version"] = newVersion;
+  doc["status"] = "success";
+  doc["mac"] = DEVICE_MAC;
+  doc["displayName"] = DISPLAY_NAME;
+  doc["ip"] = WiFi.localIP().toString();
+  doc["rssi"] = WiFi.RSSI();
 
-  int httpCode = http.POST(jsonData);
+  String jsonData;
+  serializeJson(doc, jsonData);
 
-  if (httpCode >= 200 && httpCode < 300) {
-    Serial.println("✓ Đã thông báo server về update thành công");
-  } else {
-    Serial.print("⚠️  Không thể thông báo server: HTTP ");
-    Serial.println(httpCode);
-  }
-
+  http.POST(jsonData);
   http.end();
 }
+
+// ===== WIFIMANAGER CALLBACKS =====
+
+void configModeCallback(WiFiManager* myWiFiManager) {
+  Serial.println("\n=== CONFIG MODE ===");
+  Serial.print("AP: ");
+  Serial.println(myWiFiManager->getConfigPortalSSID());
+  Serial.println("IP: 192.168.4.1");
+  blinkLED(3, 100);
+}
+
+void saveConfigCallback() {
+  String newName = String(custom_display_name.getValue());
+  String newServer = String(custom_server_url.getValue());
+  String newMqtt = String(custom_mqtt_server.getValue());
+
+  if (newName.length() > 0) DISPLAY_NAME = newName;
+  if (newServer.length() > 0) SERVER_URL = newServer;
+  if (newMqtt.length() > 0) MQTT_SERVER = newMqtt;
+
+  saveDeviceConfig();
+  blinkLED(5, 100);
+}
+
+// ===== SETUP =====
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  // Khởi tạo LED và nút reset
   pinMode(LED_PIN, OUTPUT);
   pinMode(RESET_BUTTON, INPUT_PULLUP);
-  digitalWrite(LED_PIN, LOW);
-
-  // Khởi tạo chân cảm biến
   pinMode(RAIN_AO_PIN, INPUT);
   pinMode(RAIN_DO_PIN, INPUT);
   pinMode(WATER_AO_PIN, INPUT);
 
-  Serial.println("\n\n========================================");
+  Serial.println("\n========================================");
   Serial.println("   ESP32 Flood Detection System");
-  Serial.println("   WiFiManager - Non-blocking Mode");
+  Serial.println("   MQTT + OTA Update");
   Serial.println("========================================\n");
 
-  // Hiển thị thông tin ESP32
-  Serial.println("----- Thông tin thiết bị -----");
-  Serial.print("Chip: ");
-  Serial.println(ESP.getChipModel());
+  // IMPORTANT: Init WiFi first to get valid MAC address
+  WiFi.mode(WIFI_STA);
+  delay(100);  // Give WiFi time to initialize
+
+  // Device identity
+  DEVICE_MAC = WiFi.macAddress();
+  DEVICE_ID = getMacAddressClean();
+
   Serial.print("MAC: ");
-  Serial.println(WiFi.macAddress());
-  Serial.print("Flash: ");
-  Serial.print(ESP.getFlashChipSize() / 1024 / 1024);
-  Serial.println(" MB");
-  Serial.println("------------------------------\n");
+  Serial.println(DEVICE_MAC);
+  Serial.print("Device ID: ");
+  Serial.println(DEVICE_ID);
 
-  // Load firmware version từ Preferences
-  preferences.begin("ota", false);  // false = read/write mode
-  CURRENT_FIRMWARE_VERSION = preferences.getString("fw_version", "1.0.0");
-  preferences.end();
+  // Load config
+  loadDeviceConfig();
 
-  Serial.println("----- Firmware Info -----");
-  Serial.print("Version: ");
-  Serial.println(CURRENT_FIRMWARE_VERSION);
-  Serial.println("-------------------------\n");
+  // Setup MQTT topics
+  setupTopics();
 
-  // KIỂM TRA NÚT RESET KHI KHỞI ĐỘNG
-  Serial.println("⏳ Nhấn giữ nút BOOT trong 3 giây để xóa WiFi...");
-  delay(100);
+  // Check reset button
+  Serial.println("Hold BOOT 3s to reset WiFi...");
+  unsigned long start = millis();
+  bool resetReq = false;
 
-  unsigned long startTime = millis();
-  bool resetRequested = false;
-
-  while (millis() - startTime < 3000) {
+  while (millis() - start < 3000) {
     if (digitalRead(RESET_BUTTON) == LOW) {
-      resetRequested = true;
+      resetReq = true;
       Serial.print(".");
       delay(100);
     } else {
-      resetRequested = false;
+      resetReq = false;
       break;
     }
   }
 
-  Serial.println();
-
-  if (resetRequested && digitalRead(RESET_BUTTON) == LOW) {
-    Serial.println("\n========================================");
-    Serial.println("     🗑️  XÓA WIFI ĐÃ LƯU");
-    Serial.println("========================================");
-
-    wm.resetSettings();  // Xóa WiFi đã lưu
-
-    Serial.println("✓ Đã xóa WiFi: Tang 5");
-    Serial.println("✓ Config portal sẽ mở để chọn WiFi mới");
-    Serial.println("========================================\n");
-
+  if (resetReq && digitalRead(RESET_BUTTON) == LOW) {
+    Serial.println("\nResetting WiFi...");
+    wm.resetSettings();
     blinkLED(5, 100);
     delay(2000);
-  } else {
-    Serial.println("→ Tiếp tục với WiFi đã lưu (nếu có)\n");
   }
 
-  // Khởi tạo OTA config
-  OTA_SERVER_URL = String(custom_server_url.getValue());
-  if (OTA_SERVER_URL.isEmpty() || OTA_SERVER_URL == "http://yourserver.com") {
-    OTA_SERVER_URL = "http://192.168.1.100:3000";  // Default
-  }
-  DEVICE_ID = String(custom_device_name.getValue());
-  if (DEVICE_ID.isEmpty()) {
-    DEVICE_ID = "ESP32-Device-01";  // Default
-  }
+  // WiFiManager setup
+  wm.setDebugOutput(true);
+  wm.setConfigPortalTimeout(CONFIG_PORTAL_TIMEOUT);
+  wm.setConnectTimeout(20);
+  wm.setConnectRetries(3);
 
-  Serial.println("----- OTA Configuration -----");
-  Serial.print("Firmware Version: ");
-  Serial.println(CURRENT_FIRMWARE_VERSION);
-  Serial.print("Device ID: ");
-  Serial.println(DEVICE_ID);
-  Serial.print("OTA Server: ");
-  Serial.println(OTA_SERVER_URL);
-  Serial.println("-----------------------------\n");
+  String hostname = "ESP32-" + getMacSuffix();
+  WiFi.setHostname(hostname.c_str());
 
-  // Cấu hình WiFiManager
-  wm.setDebugOutput(true);  // Debug output
-  wm.setConfigPortalTimeout(CONFIG_PORTAL_TIMEOUT);  // Timeout 3 phút
-  wm.setConfigPortalBlocking(true);  // Blocking mode
-  wm.setConnectTimeout(20);  // Timeout kết nối WiFi: 20 giây
-  wm.setConnectRetries(3);  // Thử kết nối 3 lần
-
-  // Custom config portal SSID và password (có thể để trống password)
-  // wm.setAPStaticIPConfig(IPAddress(10,0,1,1), IPAddress(10,0,1,1), IPAddress(255,255,255,0));
-
-  // Set hostname
-  WiFi.setHostname("ESP32-WiFiManager");
-
-  // Callback functions
   wm.setAPCallback(configModeCallback);
   wm.setSaveConfigCallback(saveConfigCallback);
-  wm.setSaveParamsCallback(saveParamCallback);
 
-  // Thêm custom parameters
-  wm.addParameter(&custom_device_name);
+  custom_display_name.setValue(DISPLAY_NAME.c_str(), 40);
+  custom_server_url.setValue(SERVER_URL.c_str(), 100);
+  custom_mqtt_server.setValue(MQTT_SERVER.c_str(), 40);
+
+  wm.addParameter(&custom_display_name);
   wm.addParameter(&custom_server_url);
+  wm.addParameter(&custom_mqtt_server);
 
-  // Custom HTML (nếu muốn tùy chỉnh giao diện)
-  // const char* custom_html = "<p>Custom HTML content here</p>";
-  // wm.setCustomHeadElement(custom_html);
+  String apName = "ESP32-Setup-" + getMacSuffix();
 
-  // Tên AP và password cho config portal
-  String apName = "ESP32-WiFi-Setup";
-  String apPassword = "";  // Để trống = không có mật khẩu, hoặc đặt password
-
-  Serial.println("🚀 Đang khởi động WiFiManager...\n");
-
-  // Auto connect - Tự động kết nối WiFi đã lưu hoặc mở config portal
-  bool connected = wm.autoConnect(apName.c_str(), apPassword.c_str());
-
-  if (connected) {
-    Serial.println("\n========================================");
-    Serial.println("     ✓ KẾT NỐI WIFI THÀNH CÔNG!");
-    Serial.println("========================================");
-    Serial.print("SSID: ");
-    Serial.println(WiFi.SSID());
-    Serial.print("IP Address: ");
+  if (wm.autoConnect(apName.c_str())) {
+    Serial.println("\nWiFi Connected!");
+    Serial.print("IP: ");
     Serial.println(WiFi.localIP());
-    Serial.print("Gateway: ");
-    Serial.println(WiFi.gatewayIP());
-    Serial.print("DNS: ");
-    Serial.println(WiFi.dnsIP());
-    Serial.print("Signal Strength: ");
-    Serial.print(WiFi.RSSI());
-    Serial.println(" dBm");
-    Serial.println("========================================\n");
-
-    // LED sáng khi kết nối thành công
     digitalWrite(LED_PIN, HIGH);
-    wasConnected = true;  // Đánh dấu đã kết nối
-  } else {
-    Serial.println("\n========================================");
-    Serial.println("     ✗ KHÔNG THỂ KẾT NỐI WIFI");
-    Serial.println("========================================");
-    Serial.println("Config portal timeout!");
-    Serial.println("\n⚠️  ESP32 sẽ tiếp tục hoạt động OFFLINE");
-    Serial.println("Bạn có thể:");
-    Serial.println("- Gõ 'config' để mở portal lại");
-    Serial.println("- Gõ 'help' để xem lệnh hỗ trợ");
-    Serial.println("========================================\n");
+    wasConnected = true;
 
-    wasConnected = false;  // Đánh dấu chưa kết nối
+    // Setup MQTT
+    mqttClient.setServer(MQTT_SERVER.c_str(), MQTT_PORT);
+    mqttClient.setCallback(mqttCallback);
+    mqttClient.setBufferSize(512);
+
+    // Connect to MQTT
+    connectMqtt();
+  } else {
+    Serial.println("\nWiFi Failed - Running offline");
+    wasConnected = false;
     wifiDisconnectedTime = millis();
   }
 
-  Serial.println("\n📌 GHI CHÚ:");
-  Serial.println("- ESP32 sẽ hoạt động LIÊN TỤC dù có WiFi hay không");
-  Serial.println("- Mất WiFi? ESP32 vẫn đọc sensor và lưu local");
-  Serial.println("- Gõ 'help' để xem danh sách lệnh");
-  Serial.println("- Nhấn giữ nút BOOT 5 giây để reset WiFi\n");
+  Serial.println("\n----- Ready -----");
+  Serial.print("Device: ");
+  Serial.println(DEVICE_ID);
+  Serial.print("Name: ");
+  Serial.println(DISPLAY_NAME);
+  Serial.println("-----------------\n");
 }
 
+// ===== MAIN LOOP =====
+
 void loop() {
-  // Kiểm tra lệnh từ Serial Monitor
-  if (Serial.available() > 0) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
+  unsigned long now = millis();
 
-    if (command == "reset" || command == "clear") {
-      Serial.println("\n========================================");
-      Serial.println("     🗑️  XÓA WIFI QUA SERIAL");
-      Serial.println("========================================");
+  // Serial commands
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
 
+    if (cmd == "reset") {
       wm.resetSettings();
-
-      Serial.println("✓ Đã xóa WiFi đã lưu!");
-      Serial.println("ESP32 sẽ khởi động lại...\n");
-
-      delay(2000);
+      delay(1000);
       ESP.restart();
-
-    } else if (command == "config" || command == "portal") {
-      Serial.println("\n========================================");
-      Serial.println("     🌐 MỞ CONFIG PORTAL THỦ CÔNG");
-      Serial.println("========================================");
-      Serial.println("Kết nối WiFi: ESP32-WiFi-Setup");
-      Serial.println("Truy cập: 192.168.4.1");
-      Serial.println("Nhấn Ctrl+C trong Serial để thoát portal");
-      Serial.println("========================================\n");
-
-      // Mở config portal (blocking) - chỉ khi user yêu cầu
-      wm.startConfigPortal("ESP32-WiFi-Setup");
-
-      Serial.println("\n✓ Đã đóng config portal");
-
-    } else if (command == "status" || command == "info") {
-      Serial.println("\n========== TRẠNG THÁI HỆ THỐNG ==========");
+    } else if (cmd == "status") {
+      Serial.println("\n=== STATUS ===");
+      Serial.print("Device: ");
+      Serial.println(DEVICE_ID);
       Serial.print("WiFi: ");
-      if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("Đã kết nối");
-        Serial.print("  SSID: ");
-        Serial.println(WiFi.SSID());
-        Serial.print("  IP: ");
-        Serial.println(WiFi.localIP());
-        Serial.print("  RSSI: ");
-        Serial.print(WiFi.RSSI());
-        Serial.println(" dBm");
-      } else {
-        Serial.println("Mất kết nối");
-        if (wifiDisconnectedTime > 0) {
-          Serial.print("  Offline: ");
-          Serial.print((millis() - wifiDisconnectedTime) / 1000);
-          Serial.println(" giây");
-        }
-      }
-      Serial.print("Uptime: ");
-      Serial.print(millis() / 1000);
-      Serial.println(" giây");
-      Serial.println("=========================================\n");
-
-    } else if (command == "ota" || command == "update") {
-      Serial.println("\n========================================");
-      Serial.println("     🔄 KIỂM TRA OTA UPDATE THỦ CÔNG");
-      Serial.println("========================================\n");
-
+      Serial.println(WiFi.status() == WL_CONNECTED ? "OK" : "DISCONNECTED");
+      Serial.print("MQTT: ");
+      Serial.println(mqttClient.connected() ? "OK" : "DISCONNECTED");
+      Serial.print("Firmware: ");
+      Serial.println(CURRENT_FIRMWARE_VERSION);
+      Serial.println("==============\n");
+    } else if (cmd == "ota") {
       checkForOTAUpdate();
-
-    } else if (command == "help" || command == "?") {
-      Serial.println("\n========== LỆNH HỖ TRỢ ==========");
-      Serial.println("reset / clear       - Xóa WiFi và restart");
-      Serial.println("config / portal     - Mở config portal");
-      Serial.println("status / info       - Hiển thị trạng thái");
-      Serial.println("ota / update        - Check OTA update");
-      Serial.println("help / ?            - Hiển thị trợ giúp");
-      Serial.println("==================================\n");
-    } else if (command.length() > 0) {
-      Serial.println("❌ Lệnh không hợp lệ. Gõ 'help' để xem danh sách lệnh.");
+    } else if (cmd == "clearnvs") {
+      Serial.println("Clearing all NVS data...");
+      preferences.begin("device", false);
+      preferences.clear();
+      preferences.end();
+      Serial.println("NVS cleared. Restarting...");
+      delay(1000);
+      ESP.restart();
+    } else if (cmd.startsWith("setmqtt ")) {
+      String newMqtt = cmd.substring(8);
+      newMqtt.trim();
+      if (newMqtt.length() > 0) {
+        MQTT_SERVER = newMqtt;
+        saveDeviceConfig();
+        Serial.print("MQTT server set to: ");
+        Serial.println(MQTT_SERVER);
+        Serial.println("Restarting...");
+        delay(1000);
+        ESP.restart();
+      }
+    } else if (cmd.startsWith("setserver ")) {
+      String newServer = cmd.substring(10);
+      newServer.trim();
+      if (newServer.length() > 0) {
+        SERVER_URL = newServer;
+        saveDeviceConfig();
+        Serial.print("Server URL set to: ");
+        Serial.println(SERVER_URL);
+        Serial.println("Restarting...");
+        delay(1000);
+        ESP.restart();
+      }
+    } else if (cmd == "help") {
+      Serial.println("\n=== COMMANDS ===");
+      Serial.println("reset     - Reset WiFi settings");
+      Serial.println("status    - Show current status");
+      Serial.println("ota       - Check for OTA update");
+      Serial.println("clearnvs  - Clear all NVS data and restart");
+      Serial.println("setmqtt <ip>    - Set MQTT server IP");
+      Serial.println("setserver <url> - Set server URL");
+      Serial.println("================\n");
     }
   }
 
-  // Kiểm tra nút reset
-  checkResetButton();
-
-  // ===== QUẢN LÝ KẾT NỐI WIFI - NON-BLOCKING =====
   bool isConnected = (WiFi.status() == WL_CONNECTED);
-  unsigned long currentMillis = millis();
 
+  // WiFi management
   if (isConnected) {
-    // ===== CÓ WIFI - HOẠT ĐỘNG BÌNH THƯỜNG =====
-
     if (!wasConnected) {
-      // Vừa kết nối lại
-      Serial.println("\n========================================");
-      Serial.println("     ✓ WIFI ĐÃ KẾT NỐI TRỞ LẠI!");
-      Serial.println("========================================");
-      Serial.print("IP: ");
-      Serial.println(WiFi.localIP());
-      Serial.print("Thời gian offline: ");
-      if (wifiDisconnectedTime > 0) {
-        Serial.print((millis() - wifiDisconnectedTime) / 1000);
-        Serial.println(" giây");
-      } else {
-        Serial.println("0 giây");
-      }
-      Serial.println("========================================\n");
-
+      Serial.println("WiFi reconnected!");
       wifiDisconnectedTime = 0;
       wasConnected = true;
     }
 
-    // Hiển thị trạng thái mỗi 30 giây
-    static unsigned long lastStatusPrint = 0;
-    if (currentMillis - lastStatusPrint >= 30000) {
-      lastStatusPrint = currentMillis;
+    // MQTT management
+    if (!mqttClient.connected()) {
+      if (mqttWasConnected) {
+        Serial.println("[MQTT] Disconnected!");
+        mqttWasConnected = false;
+      }
+      connectMqtt();
+    }
+    mqttClient.loop();
 
-      Serial.print("✓ WiFi OK | IP: ");
-      Serial.print(WiFi.localIP());
+    // Status print
+    if (now - lastStatusPrint >= STATUS_PRINT_INTERVAL) {
+      lastStatusPrint = now;
+      Serial.print("WiFi OK | MQTT ");
+      Serial.print(mqttClient.connected() ? "OK" : "FAIL");
+      Serial.print(" | ");
+      Serial.print(DEVICE_ID);
       Serial.print(" | RSSI: ");
-      Serial.print(WiFi.RSSI());
-      Serial.println(" dBm");
+      Serial.println(WiFi.RSSI());
     }
 
-    // LED sáng liên tục khi có WiFi
-    digitalWrite(LED_PIN, HIGH);
-
-    // ===== TỰ ĐỘNG CHECK OTA UPDATE =====
-    // Check OTA update mỗi 60 giây khi có WiFi
-    if (currentMillis - lastOTACheck >= OTA_CHECK_INTERVAL) {
-      lastOTACheck = currentMillis;
-
-      Serial.println("\n[OTA] Tự động check update...");
+    // OTA check
+    if (now - lastOTACheck >= OTA_CHECK_INTERVAL) {
+      lastOTACheck = now;
       checkForOTAUpdate();
     }
 
+    digitalWrite(LED_PIN, HIGH);
+
   } else {
-    // ===== MẤT WIFI - VẪN HOẠT ĐỘNG BÌNH THƯỜNG =====
-
+    // WiFi disconnected
     if (wasConnected) {
-      // Vừa mất kết nối
-      Serial.println("\n⚠️ ========================================");
-      Serial.println("     MẤT KẾT NỐI WIFI!");
-      Serial.println("========================================");
-      Serial.println("✓ ESP32 vẫn hoạt động bình thường");
-      Serial.println("✓ Đang đọc sensor và lưu data local");
-      Serial.println("✓ Sẽ tự động kết nối lại khi WiFi trở lại");
-      Serial.println("========================================\n");
-
-      wifiDisconnectedTime = millis();
+      Serial.println("WiFi disconnected!");
+      wifiDisconnectedTime = now;
       wasConnected = false;
     }
 
-    // Thử reconnect mỗi 30 giây (KHÔNG BLOCKING)
-    if (currentMillis - lastReconnectAttempt >= WIFI_RECONNECT_INTERVAL) {
-      lastReconnectAttempt = currentMillis;
-
-      unsigned long offlineSeconds = (millis() - wifiDisconnectedTime) / 1000;
-      Serial.print("[*] Thử kết nối lại WiFi (offline: ");
-      Serial.print(offlineSeconds);
-      Serial.println("s)...");
-
+    // Reconnect attempt
+    if (now - lastReconnectAttempt >= WIFI_RECONNECT_INTERVAL) {
+      lastReconnectAttempt = now;
       WiFi.reconnect();
-
-      // Chờ 3 giây xem có kết nối được không (non-blocking)
-      unsigned long reconnectStart = millis();
-      while (millis() - reconnectStart < 3000) {
-        if (WiFi.status() == WL_CONNECTED) {
-          break;
-        }
-        delay(100);
-      }
-
-      if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("    → Chưa kết nối được, sẽ thử lại sau 30s");
-      }
     }
 
-    // LED nhấp nháy chậm khi mất WiFi (vẫn hoạt động)
+    // LED blink when offline
     static unsigned long lastBlink = 0;
-    if (currentMillis - lastBlink >= 1000) {
-      lastBlink = currentMillis;
+    if (now - lastBlink >= 1000) {
+      lastBlink = now;
       digitalWrite(LED_PIN, !digitalRead(LED_PIN));
     }
-
-    // Hiển thị cảnh báo mỗi 5 phút
-    static unsigned long lastWarning = 0;
-    if (currentMillis - lastWarning >= 300000) {  // 5 phút
-      lastWarning = currentMillis;
-      unsigned long offlineMinutes = (millis() - wifiDisconnectedTime) / 60000;
-      Serial.print("⚠️  Đã mất WiFi ");
-      Serial.print(offlineMinutes);
-      Serial.println(" phút - ESP32 vẫn đang hoạt động");
-    }
   }
 
-  // ===== ĐỌC CẢM BIẾN - FLOOD DETECTION =====
-  // LUÔN CHẠY DÙ CÓ WIFI HAY KHÔNG
+  // Sensor reading
+  if (now - lastSensorRead >= SENSOR_READ_INTERVAL) {
+    lastSensorRead = now;
 
-  static unsigned long lastSensorRead = 0;
-  if (currentMillis - lastSensorRead >= 2000) {  // Đọc sensor mỗi 2 giây
-    lastSensorRead = currentMillis;
+    int rainAnalog = analogRead(RAIN_AO_PIN);
+    int rainDigital = digitalRead(RAIN_DO_PIN);
+    int waterLevel = analogRead(WATER_AO_PIN);
 
-    // ===== ĐỌC CẢM BIẾN THẬT =====
-    int rainAnalog = analogRead(RAIN_AO_PIN);     // 0-4095: Cảm biến mưa (analog)
-    int rainDigital = digitalRead(RAIN_DO_PIN);   // 0 hoặc 1: Cảm biến mưa (digital)
-    int waterLevel = analogRead(WATER_AO_PIN);    // 0-4095: Mực nước
+    // Determine status
+    String waterStatus = waterLevel < WATER_WARNING_LEVEL ? "SAFE" :
+                         waterLevel < WATER_DANGER_LEVEL ? "WARNING" : "DANGER";
+    String rainStatus = rainAnalog >= RAIN_DRY_THRESHOLD ? "DRY" :
+                        rainAnalog >= RAIN_WARNING_THRESHOLD ? "LIGHT" : "HEAVY";
 
-    // Hiển thị dữ liệu sensor
-    Serial.println("\n========== ĐỌC CẢM BIẾN ==========");
-    Serial.print("🌧️  Mưa (AO): ");
+    Serial.print("Rain: ");
     Serial.print(rainAnalog);
-    Serial.print(" | Mưa (DO): ");
-    Serial.print(rainDigital ? "KHÔNG MƯA" : "CÓ MƯA");
-    Serial.print(" | 💧 Mực nước: ");
-    Serial.println(waterLevel);
-
-    // Phân tích trạng thái
-    String waterStatus = "";
-    String rainStatus = "";
-
-    // Đánh giá mực nước
-    if (waterLevel < WATER_WARNING_LEVEL) {
-      waterStatus = "Bình thường";
-    } else if (waterLevel < WATER_DANGER_LEVEL) {
-      waterStatus = "⚠️  CẢNH BÁO";
-    } else {
-      waterStatus = "🚨 NGUY HIỂM";
-    }
-
-    // Đánh giá mưa (NGƯỢC: Cao = Khô, Thấp = Ướt)
-    if (rainAnalog >= RAIN_DRY_THRESHOLD) {
-      rainStatus = "☀️  Khô ráo / Không mưa";
-    } else if (rainAnalog >= RAIN_WARNING_THRESHOLD) {
-      rainStatus = "🌦️  Mưa nhẹ / vừa";
-    } else {
-      rainStatus = "⚠️  Mưa lớn";
-    }
-
-    Serial.print("Trạng thái nước: ");
+    Serial.print(" (");
+    Serial.print(rainStatus);
+    Serial.print(") | Water: ");
+    Serial.print(waterLevel);
+    Serial.print(" (");
     Serial.print(waterStatus);
-    Serial.print(" | Trạng thái mưa: ");
-    Serial.println(rainStatus);
+    Serial.println(")");
 
-    // Nếu có WiFi → Gửi lên server
-    if (isConnected) {
-      Serial.print("📤 Gửi data lên server... ");
-
-      // TODO: Thêm HTTPClient để gửi data
-      // #include <HTTPClient.h> (thêm ở đầu file)
-      /*
-      HTTPClient http;
-      String serverUrl = String(custom_server_url.getValue());
-      http.begin(serverUrl + "/api/sensor-data");
-      http.addHeader("Content-Type", "application/json");
-
-      // Tạo JSON data
-      String jsonData = "{";
-      jsonData += "\"device\":\"" + String(custom_device_name.getValue()) + "\",";
-      jsonData += "\"rainAnalog\":" + String(rainAnalog) + ",";
-      jsonData += "\"rainDigital\":" + String(rainDigital) + ",";
-      jsonData += "\"waterLevel\":" + String(waterLevel) + ",";
-      jsonData += "\"timestamp\":" + String(millis());
-      jsonData += "}";
-
-      int httpCode = http.POST(jsonData);
-
-      if (httpCode == 200) {
-        Serial.println("✓ Thành công");
-      } else {
-        Serial.print("✗ Lỗi: ");
-        Serial.println(httpCode);
-      }
-      http.end();
-      */
-
-      Serial.println("✓ OK (TODO: implement HTTPClient)");
-
-    } else {
-      // Nếu mất WiFi → Lưu data local
-      Serial.println("💾 Lưu vào buffer local (sẽ sync khi có WiFi)");
-
-      // TODO: Lưu vào SD card hoặc SPIFFS
-      /*
-      File file = SD.open("/flood_data.txt", FILE_APPEND);
-      if (file) {
-        file.print(millis());
-        file.print(",");
-        file.print(rainAnalog);
-        file.print(",");
-        file.print(rainDigital);
-        file.print(",");
-        file.println(waterLevel);
-        file.close();
-      }
-      */
+    // Publish via MQTT (much lighter than HTTP!)
+    if (mqttClient.connected()) {
+      publishSensorData(rainAnalog, rainDigital, waterLevel);
     }
 
-    // ===== CẢNH BÁO NGUY HIỂM =====
-    bool isDanger = false;
-
-    // Cảnh báo mực nước cao
+    // Alerts
     if (waterLevel >= WATER_DANGER_LEVEL) {
-      Serial.println("\n🚨🚨🚨 NGUY HIỂM: MỰC NƯỚC RẤT CAO! 🚨🚨🚨");
-      Serial.print("   Mực nước: ");
-      Serial.print(waterLevel);
-      Serial.print(" (ngưỡng: ");
-      Serial.print(WATER_DANGER_LEVEL);
-      Serial.println(")");
-      isDanger = true;
-
-    } else if (waterLevel >= WATER_WARNING_LEVEL) {
-      Serial.println("\n⚠️  CẢNH BÁO: Mực nước đang tăng cao!");
-      Serial.print("   Mực nước: ");
-      Serial.print(waterLevel);
-      Serial.print(" (ngưỡng: ");
-      Serial.print(WATER_WARNING_LEVEL);
-      Serial.println(")");
+      Serial.println("!!! DANGER: HIGH WATER LEVEL !!!");
     }
-
-    // Cảnh báo mưa lớn (NGƯỢC: Thấp = Mưa lớn)
     if (rainAnalog < RAIN_WARNING_THRESHOLD) {
-      Serial.println("⚠️  CẢNH BÁO: Mưa lớn!");
-      Serial.print("   Mưa: ");
-      Serial.print(rainAnalog);
-      Serial.print(" (ngưỡng: < ");
-      Serial.print(RAIN_WARNING_THRESHOLD);
-      Serial.println(")");
+      Serial.println("!!! WARNING: HEAVY RAIN !!!");
     }
-
-    // Cảnh báo kép: Mưa lớn + Mực nước cao
-    if (rainAnalog < RAIN_WARNING_THRESHOLD && waterLevel >= WATER_WARNING_LEVEL) {
-      Serial.println("\n🚨 CẢNH BÁO KÉP: MƯA LỚN + MỰC NƯỚC CAO!");
-      Serial.println("   ⚠️  Nguy cơ lũ lụt cao!");
-      isDanger = true;
-    }
-
-    // TODO: Kích hoạt buzzer/LED cảnh báo
-    if (isDanger) {
-      // digitalWrite(BUZZER_PIN, HIGH);
-      // delay(100);
-      // digitalWrite(BUZZER_PIN, LOW);
-    }
-
-    Serial.println("===================================\n");
   }
 
-  delay(100);
+  delay(10);
 }

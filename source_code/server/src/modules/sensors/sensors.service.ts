@@ -1,0 +1,274 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { RainStatus, WaterStatus } from '@prisma/client';
+import { SensorDataDto } from './dto/sensor-data.dto';
+import { formatMacAddress } from '../../common/utils';
+
+const RAIN_DRY_THRESHOLD = 3000;
+const RAIN_WARNING_THRESHOLD = 2000;
+
+@Injectable()
+export class SensorsService {
+  private readonly logger = new Logger(SensorsService.name);
+
+  constructor(private prisma: PrismaService) {}
+
+  async processSensorData(data: SensorDataDto) {
+    this.logger.log(`Received sensor data from ${data.deviceId}`);
+
+    const device = await this.findOrCreateDevice(data);
+
+    const rainStatus = this.calculateRainStatus(data.rainAnalog);
+    const waterStatus = this.calculateWaterStatus(data.waterLevel);
+
+    const reading = await this.prisma.sensorReading.create({
+      data: {
+        deviceId: device.id,
+        rainAnalog: data.rainAnalog,
+        rainDigital: data.rainDigital,
+        waterLevel: data.waterLevel,
+        rainStatus,
+        waterStatus,
+        rssi: data.rssi,
+      },
+    });
+
+    await this.prisma.device.update({
+      where: { id: device.id },
+      data: {
+        isOnline: true,
+        lastHeartbeat: new Date(),
+        ipAddress: data.ip,
+        rssi: data.rssi,
+        firmwareVersion: data.firmwareVersion || device.firmwareVersion,
+      },
+    });
+
+    await this.checkAndCreateAlerts(device.id, data, rainStatus, waterStatus);
+
+    return {
+      id: reading.id,
+      deviceId: data.deviceId,
+      rainStatus,
+      waterStatus,
+      timestamp: reading.timestamp,
+    };
+  }
+
+  private async findOrCreateDevice(data: SensorDataDto) {
+    const macAddress = formatMacAddress(data.deviceId);
+
+    let device = await this.prisma.device.findFirst({
+      where: { deviceId: data.deviceId },
+    });
+
+    if (device) {
+      return device;
+    }
+
+    device = await this.prisma.device.findFirst({
+      where: { macAddress },
+    });
+
+    if (device) {
+      if (device.deviceId !== data.deviceId) {
+        device = await this.prisma.device.update({
+          where: { id: device.id },
+          data: { deviceId: data.deviceId },
+        });
+      }
+      return device;
+    }
+
+    const displayName = data.displayName || `Device-${data.deviceId.slice(-6)}`;
+
+    this.logger.log(`Creating new device: ${data.deviceId} (${macAddress}) - "${displayName}"`);
+
+    device = await this.prisma.device.create({
+      data: {
+        deviceId: data.deviceId,
+        macAddress,
+        name: displayName,
+        firmwareVersion: data.firmwareVersion || '1.0.0',
+        ipAddress: data.ip,
+        rssi: data.rssi,
+        isOnline: true,
+        lastHeartbeat: new Date(),
+      },
+    });
+
+    return device;
+  }
+
+  private calculateRainStatus(rainAnalog: number): RainStatus {
+    if (rainAnalog >= RAIN_DRY_THRESHOLD) {
+      return RainStatus.DRY;
+    } else if (rainAnalog >= RAIN_WARNING_THRESHOLD) {
+      return RainStatus.LIGHT;
+    } else {
+      return RainStatus.HEAVY;
+    }
+  }
+
+  private calculateWaterStatus(waterLevel: number): WaterStatus {
+    if (waterLevel < 683) {
+      return WaterStatus.SAFE;
+    } else if (waterLevel < 1365) {
+      return WaterStatus.LOW;
+    } else if (waterLevel < 2048) {
+      return WaterStatus.WARNING;
+    } else if (waterLevel < 3413) {
+      return WaterStatus.DANGER;
+    } else {
+      return WaterStatus.CRITICAL;
+    }
+  }
+
+  private async checkAndCreateAlerts(
+    deviceDbId: string,
+    data: SensorDataDto,
+    rainStatus: RainStatus,
+    waterStatus: WaterStatus,
+  ) {
+    const alerts: Array<{
+      type: 'WATER_WARNING' | 'WATER_DANGER' | 'HEAVY_RAIN';
+      severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+      message: string;
+    }> = [];
+
+    if (waterStatus === WaterStatus.CRITICAL) {
+      alerts.push({
+        type: 'WATER_DANGER',
+        severity: 'CRITICAL',
+        message: `Muc nuoc cuc ky nguy hiem: ${data.waterLevel} (>3413)`,
+      });
+    } else if (waterStatus === WaterStatus.DANGER) {
+      alerts.push({
+        type: 'WATER_DANGER',
+        severity: 'HIGH',
+        message: `Muc nuoc nguy hiem: ${data.waterLevel} (2048-3413)`,
+      });
+    } else if (waterStatus === WaterStatus.WARNING) {
+      alerts.push({
+        type: 'WATER_WARNING',
+        severity: 'MEDIUM',
+        message: `Canh bao muc nuoc: ${data.waterLevel} (1365-2048)`,
+      });
+    }
+
+    if (rainStatus === RainStatus.HEAVY) {
+      alerts.push({
+        type: 'HEAVY_RAIN',
+        severity: 'MEDIUM',
+        message: `Mua lon: ${data.rainAnalog} (<${RAIN_WARNING_THRESHOLD})`,
+      });
+    }
+
+    for (const alert of alerts) {
+      const existingAlert = await this.prisma.alert.findFirst({
+        where: {
+          deviceId: deviceDbId,
+          type: alert.type,
+          isResolved: false,
+          createdAt: {
+            gte: new Date(Date.now() - 5 * 60 * 1000),
+          },
+        },
+      });
+
+      if (!existingAlert) {
+        await this.prisma.alert.create({
+          data: {
+            deviceId: deviceDbId,
+            type: alert.type,
+            severity: alert.severity,
+            message: alert.message,
+            waterLevel: data.waterLevel,
+            rainAnalog: data.rainAnalog,
+          },
+        });
+
+        this.logger.warn(`Alert created: ${alert.type} - ${alert.message}`);
+      }
+    }
+  }
+
+  async updateDeviceStatus(data: {
+    deviceId: string;
+    mac?: string;
+    displayName?: string;
+    ip?: string;
+    wifiSSID?: string;
+    rssi?: number;
+    firmwareVersion?: string;
+    uptime?: number;
+    chipModel?: string;
+    freeHeap?: number;
+    flashSize?: number;
+    isOnline?: boolean;
+  }) {
+    const macAddress = formatMacAddress(data.deviceId);
+
+    let device = await this.prisma.device.findFirst({
+      where: { deviceId: data.deviceId },
+    });
+
+    if (!device) {
+      device = await this.prisma.device.findFirst({
+        where: { macAddress },
+      });
+    }
+
+    if (!device) {
+      const displayName = data.displayName || `Device-${data.deviceId.slice(-6)}`;
+      this.logger.log(`Creating new device from status: ${data.deviceId}`);
+
+      device = await this.prisma.device.create({
+        data: {
+          deviceId: data.deviceId,
+          macAddress,
+          name: displayName,
+          firmwareVersion: data.firmwareVersion || '1.0.0',
+          ipAddress: data.ip,
+          wifiSSID: data.wifiSSID,
+          rssi: data.rssi,
+          uptime: data.uptime || 0,
+          chipModel: data.chipModel,
+          freeHeap: data.freeHeap,
+          flashSize: data.flashSize,
+          isOnline: data.isOnline ?? true,
+          lastHeartbeat: new Date(),
+        },
+      });
+
+      return device;
+    }
+
+    const updateData: Record<string, unknown> = {
+      isOnline: data.isOnline ?? true,
+      lastHeartbeat: new Date(),
+    };
+
+    if (data.ip) updateData.ipAddress = data.ip;
+    if (data.wifiSSID) updateData.wifiSSID = data.wifiSSID;
+    if (data.rssi !== undefined) updateData.rssi = data.rssi;
+    if (data.firmwareVersion) updateData.firmwareVersion = data.firmwareVersion;
+    if (data.uptime !== undefined) updateData.uptime = data.uptime;
+    if (data.chipModel) updateData.chipModel = data.chipModel;
+    if (data.freeHeap !== undefined) updateData.freeHeap = data.freeHeap;
+    if (data.flashSize !== undefined) updateData.flashSize = data.flashSize;
+
+    if (data.displayName && data.displayName !== 'Unnamed Device') {
+      if (device.name.startsWith('Device-') || device.name === 'Unnamed Device') {
+        updateData.name = data.displayName;
+      }
+    }
+
+    this.logger.log(`Updating device ${data.deviceId}: ${JSON.stringify(updateData)}`);
+
+    return this.prisma.device.update({
+      where: { id: device.id },
+      data: updateData,
+    });
+  }
+}

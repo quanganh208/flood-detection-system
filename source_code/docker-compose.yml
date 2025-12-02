@@ -10,8 +10,8 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=3000
-      - MQTT_BROKER=mqtt://mosquitto:1883
-      - PLATFORMIO_BUILDER_URL=http://platformio-builder:5000  # Internal Docker network uses port 5000
+      - MQTT_BROKER_URL=mqtt://mosquitto:1883
+      - PLATFORMIO_BUILDER_URL=http://platformio-builder:5000
       - DATABASE_URL=postgresql://flood_user:flood_password@postgres:5432/flood_detection?schema=public
     volumes:
       - ./server:/app
@@ -71,7 +71,6 @@ services:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - mosquitto-config:/mosquitto/config
       - mosquitto-data:/mosquitto/data
       - mosquitto-log:/mosquitto/log
     networks:

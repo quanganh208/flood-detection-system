@@ -15,14 +15,43 @@ export class OtaController {
   @Get('check/:deviceId')
   @ApiOperation({
     summary: 'Check for firmware update',
-    description: 'ESP32 device checks if a newer firmware version is available',
+    description:
+      'ESP32 device checks if a newer firmware version is available. Device ID should be MAC address without colons (e.g., "AABBCCDDEEFF")',
   })
-  @ApiParam({ name: 'deviceId', description: 'Unique device identifier' })
+  @ApiParam({
+    name: 'deviceId',
+    description: 'MAC address without colons (e.g., "AABBCCDDEEFF")',
+    example: 'AABBCCDDEEFF',
+  })
   @ApiQuery({
     name: 'version',
     required: false,
     description: 'Current firmware version on the device',
     example: '1.0.0',
+  })
+  @ApiQuery({
+    name: 'mac',
+    required: false,
+    description: 'Full MAC address with colons (e.g., "AA:BB:CC:DD:EE:FF")',
+    example: 'AA:BB:CC:DD:EE:FF',
+  })
+  @ApiQuery({
+    name: 'name',
+    required: false,
+    description: 'Display name configured on the device',
+    example: 'Sensor-Garden',
+  })
+  @ApiQuery({
+    name: 'ip',
+    required: false,
+    description: 'Current IP address of the device',
+    example: '192.168.1.100',
+  })
+  @ApiQuery({
+    name: 'rssi',
+    required: false,
+    description: 'WiFi signal strength in dBm',
+    example: '-65',
   })
   @ApiResponse({
     status: 200,
@@ -34,9 +63,10 @@ export class OtaController {
         data: {
           type: 'object',
           properties: {
-            updateAvailable: { type: 'boolean', example: true },
+            available: { type: 'boolean', example: true },
             version: { type: 'string', example: '1.1.0' },
-            downloadUrl: { type: 'string', example: '/api/ota/download/abc123' },
+            buildId: { type: 'string', example: 'abc123-def456' },
+            url: { type: 'string', example: '/api/ota/download/abc123' },
             size: { type: 'number', example: 524288 },
             md5: { type: 'string', example: 'a1b2c3d4e5f6' },
           },
@@ -47,10 +77,23 @@ export class OtaController {
   async checkForUpdate(
     @Param('deviceId') deviceId: string,
     @Query('version') currentVersion: string = '0.0.0',
+    @Query('mac') mac?: string,
+    @Query('name') name?: string,
+    @Query('ip') ip?: string,
+    @Query('rssi') rssi?: string,
   ) {
-    this.logger.log(`Device ${deviceId} checking for update (current: ${currentVersion})`);
+    this.logger.log(
+      `Device ${deviceId} checking for update (version: ${currentVersion}, mac: ${mac}, name: ${name}, ip: ${ip}, rssi: ${rssi})`,
+    );
 
-    const result = await this.otaService.checkForUpdate(deviceId, currentVersion);
+    const deviceInfo = {
+      mac,
+      name,
+      ip,
+      rssi: rssi ? parseInt(rssi, 10) : undefined,
+    };
+
+    const result = await this.otaService.checkForUpdate(deviceId, currentVersion, deviceInfo);
 
     return {
       success: true,
@@ -103,19 +146,49 @@ export class OtaController {
   @Post('verify/:deviceId')
   @ApiOperation({
     summary: 'Verify OTA update',
-    description: 'ESP32 device reports the result of an OTA update attempt',
+    description:
+      'ESP32 device reports the result of an OTA update attempt. Device ID should be MAC address without colons.',
   })
-  @ApiParam({ name: 'deviceId', description: 'Unique device identifier' })
+  @ApiParam({
+    name: 'deviceId',
+    description: 'MAC address without colons (e.g., "AABBCCDDEEFF")',
+    example: 'AABBCCDDEEFF',
+  })
   @ApiResponse({
     status: 200,
     description: 'Update verification recorded successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        data: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean', example: true },
+            message: { type: 'string', example: 'Update success recorded' },
+          },
+        },
+      },
+    },
   })
   async verifyUpdate(@Param('deviceId') deviceId: string, @Body() body: VerifyUpdateDto) {
+    this.logger.log(`Device ${deviceId} verifying update: ${JSON.stringify(body)}`);
+
+    const deviceInfo = {
+      mac: body.mac,
+      displayName: body.displayName,
+      ip: body.ip,
+      rssi: body.rssi,
+    };
+
+    const versionOrBuildId = body.version || body.buildId || 'unknown';
+
     const result = await this.otaService.verifyUpdate(
       deviceId,
-      body.buildId,
+      versionOrBuildId,
       body.status,
       body.errorMessage,
+      deviceInfo,
     );
 
     return {

@@ -2,9 +2,22 @@ import { Injectable, Logger } from '@nestjs/common';
 import { FirmwareService } from '../firmware/firmware.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OTAStatus, BuildStatus, Prisma } from '@prisma/client';
-import * as crypto from 'crypto';
-import * as fs from 'fs';
 import * as semver from 'semver';
+import { calculateMD5, formatMacAddress } from '../../common/utils';
+
+export interface DeviceInfo {
+  mac?: string;
+  name?: string;
+  ip?: string;
+  rssi?: number;
+}
+
+export interface VerifyDeviceInfo {
+  mac?: string;
+  displayName?: string;
+  ip?: string;
+  rssi?: number;
+}
 
 @Injectable()
 export class OtaService {
@@ -15,7 +28,11 @@ export class OtaService {
     private prisma: PrismaService,
   ) {}
 
-  async checkForUpdate(deviceId: string, currentVersion: string) {
+  async checkForUpdate(deviceId: string, currentVersion: string, deviceInfo?: DeviceInfo) {
+    this.logger.log(
+      `OTA check - Device: ${deviceId}, Version: ${currentVersion}, Info: ${JSON.stringify(deviceInfo)}`,
+    );
+
     const latestFirmware = await this.prisma.firmware.findFirst({
       where: {
         isLatest: true,
@@ -31,22 +48,9 @@ export class OtaService {
       };
     }
 
-    let device = await this.prisma.device.findFirst({
-      where: { deviceId },
-    });
+    let device = await this.findOrCreateDevice(deviceId, currentVersion, deviceInfo);
 
-    if (!device) {
-      device = await this.prisma.device.create({
-        data: {
-          deviceId,
-          name: deviceId,
-          macAddress: `unknown-${deviceId}`,
-          firmwareVersion: currentVersion,
-          isOnline: true,
-          lastHeartbeat: new Date(),
-        },
-      });
-    }
+    device = await this.updateDeviceHeartbeat(device.id, currentVersion, deviceInfo);
 
     const shouldUpdate = this.shouldUpdateFirmware(currentVersion, latestFirmware.version);
 
@@ -60,6 +64,10 @@ export class OtaService {
           status: OTAStatus.PENDING,
         },
       });
+
+      this.logger.log(
+        `OTA update available for ${deviceId}: ${currentVersion} -> ${latestFirmware.version}`,
+      );
 
       return {
         available: true,
@@ -77,6 +85,90 @@ export class OtaService {
       message: 'Already up to date',
       currentVersion,
     };
+  }
+
+  private async findOrCreateDevice(
+    deviceId: string,
+    currentVersion: string,
+    deviceInfo?: DeviceInfo,
+  ) {
+    const macAddress = formatMacAddress(deviceId);
+
+    let device = await this.prisma.device.findFirst({
+      where: { deviceId },
+    });
+
+    if (device) {
+      return device;
+    }
+
+    device = await this.prisma.device.findFirst({
+      where: { macAddress },
+    });
+
+    if (device) {
+      if (device.deviceId !== deviceId) {
+        device = await this.prisma.device.update({
+          where: { id: device.id },
+          data: { deviceId },
+        });
+      }
+      return device;
+    }
+
+    const displayName = deviceInfo?.name || `Device-${deviceId.slice(-6)}`;
+
+    this.logger.log(`Creating new device: ${deviceId} (${macAddress}) - "${displayName}"`);
+
+    device = await this.prisma.device.create({
+      data: {
+        deviceId,
+        macAddress,
+        name: displayName,
+        firmwareVersion: currentVersion,
+        ipAddress: deviceInfo?.ip,
+        rssi: deviceInfo?.rssi,
+        isOnline: true,
+        lastHeartbeat: new Date(),
+      },
+    });
+
+    return device;
+  }
+
+  private async updateDeviceHeartbeat(
+    deviceDbId: string,
+    currentVersion: string,
+    deviceInfo?: DeviceInfo,
+  ) {
+    const updateData: Prisma.DeviceUpdateInput = {
+      firmwareVersion: currentVersion,
+      isOnline: true,
+      lastHeartbeat: new Date(),
+    };
+
+    if (deviceInfo?.ip) {
+      updateData.ipAddress = deviceInfo.ip;
+    }
+
+    if (deviceInfo?.rssi !== undefined) {
+      updateData.rssi = deviceInfo.rssi;
+    }
+
+    if (deviceInfo?.name) {
+      const device = await this.prisma.device.findUnique({
+        where: { id: deviceDbId },
+      });
+
+      if (device && (device.name.startsWith('Device-') || device.name === 'Unnamed Device')) {
+        updateData.name = deviceInfo.name;
+      }
+    }
+
+    return this.prisma.device.update({
+      where: { id: deviceDbId },
+      data: updateData,
+    });
   }
 
   private shouldUpdateFirmware(currentVersion: string, latestVersion: string): boolean {
@@ -98,7 +190,7 @@ export class OtaService {
         buildId,
         version: info.version || 'unknown',
         size: info.size,
-        md5: info.md5 || this.calculateMD5(info.path),
+        md5: info.md5 || calculateMD5(info.path),
         path: info.path,
       };
     }
@@ -113,34 +205,74 @@ export class OtaService {
     };
   }
 
-  private calculateMD5(filePath: string): string {
-    const fileBuffer = fs.readFileSync(filePath);
-    const hash = crypto.createHash('md5');
-    hash.update(fileBuffer);
-    return hash.digest('hex');
-  }
-
-  async verifyUpdate(deviceId: string, buildId: string, status: string, errorMessage?: string) {
+  async verifyUpdate(
+    deviceId: string,
+    versionOrBuildId: string,
+    status: string,
+    errorMessage?: string,
+    deviceInfo?: VerifyDeviceInfo,
+  ) {
     try {
-      const device = await this.prisma.device.findFirst({
+      this.logger.log(
+        `OTA verify - Device: ${deviceId}, Version/BuildId: ${versionOrBuildId}, Status: ${status}`,
+      );
+
+      let device = await this.prisma.device.findFirst({
         where: { deviceId },
       });
 
       if (!device) {
-        return {
-          success: false,
-          message: 'Device not found',
-        };
+        const macAddress = formatMacAddress(deviceId);
+        device = await this.prisma.device.findFirst({
+          where: { macAddress },
+        });
       }
 
-      const firmware = await this.prisma.firmware.findUnique({
-        where: { buildId },
+      if (!device) {
+        device = await this.prisma.device.create({
+          data: {
+            deviceId,
+            macAddress: formatMacAddress(deviceId),
+            name: deviceInfo?.displayName || `Device-${deviceId.slice(-6)}`,
+            firmwareVersion: versionOrBuildId,
+            ipAddress: deviceInfo?.ip,
+            rssi: deviceInfo?.rssi,
+            isOnline: true,
+            lastHeartbeat: new Date(),
+          },
+        });
+
+        this.logger.log(`Created device during verify: ${deviceId}`);
+      }
+
+      let firmware = await this.prisma.firmware.findUnique({
+        where: { buildId: versionOrBuildId },
       });
 
       if (!firmware) {
+        firmware = await this.prisma.firmware.findFirst({
+          where: { version: versionOrBuildId },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
+      if (!firmware) {
+        this.logger.warn(`Firmware not found for: ${versionOrBuildId}`);
+        if (status === 'success') {
+          await this.prisma.device.update({
+            where: { id: device.id },
+            data: {
+              firmwareVersion: versionOrBuildId,
+              lastHeartbeat: new Date(),
+              isOnline: true,
+              ipAddress: deviceInfo?.ip,
+              rssi: deviceInfo?.rssi,
+            },
+          });
+        }
         return {
-          success: false,
-          message: 'Firmware not found',
+          success: true,
+          message: `Update ${status} recorded (firmware record not found)`,
         };
       }
 
@@ -169,6 +301,19 @@ export class OtaService {
           },
         });
 
+        if (status === 'success') {
+          await this.prisma.device.update({
+            where: { id: device.id },
+            data: {
+              firmwareVersion: firmware.version,
+              lastHeartbeat: new Date(),
+              isOnline: true,
+              ipAddress: deviceInfo?.ip,
+              rssi: deviceInfo?.rssi,
+            },
+          });
+        }
+
         return {
           success: true,
           message: `Update ${status} recorded (new record created)`,
@@ -189,6 +334,9 @@ export class OtaService {
           data: {
             firmwareVersion: firmware.version,
             lastHeartbeat: new Date(),
+            isOnline: true,
+            ipAddress: deviceInfo?.ip,
+            rssi: deviceInfo?.rssi,
           },
         });
       } else {
@@ -207,11 +355,11 @@ export class OtaService {
         message: `Update ${status} recorded`,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to verify update: ${errorMessage}`);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to verify update: ${errMsg}`);
       return {
         success: false,
-        message: `Failed to record update: ${errorMessage}`,
+        message: `Failed to record update: ${errMsg}`,
       };
     }
   }

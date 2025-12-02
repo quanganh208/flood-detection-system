@@ -71,14 +71,6 @@ export class BuildStreamService {
     }, 3600000);
   }
 
-  hasStream(buildId: string): boolean {
-    return this.buildStreams.has(buildId);
-  }
-
-  getActiveStreamCount(): number {
-    return this.buildStreams.size;
-  }
-
   private getEventsAfter(buildId: string, eventId?: number): Array<BuildEvent & { id: number }> {
     if (eventId === undefined) {
       return [];

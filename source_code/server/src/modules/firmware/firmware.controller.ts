@@ -93,25 +93,6 @@ export class FirmwareController {
     };
   }
 
-  @Get('build/:buildId/status')
-  @ApiOperation({
-    summary: 'Get build status',
-    description: 'Retrieve current status of a firmware build',
-  })
-  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
-  @ApiResponse({
-    status: 200,
-    description: 'Build status retrieved successfully',
-  })
-  getBuildStatus(@Param('buildId') buildId: string) {
-    const status = this.firmwareService.getBuildStatus(buildId);
-
-    return {
-      success: true,
-      data: status,
-    };
-  }
-
   @Sse('build/:buildId/stream')
   @ApiOperation({
     summary: 'Stream build progress',
@@ -269,28 +250,6 @@ export class FirmwareController {
       success: true,
       message: 'Firmware metadata updated',
       data: updated,
-    };
-  }
-
-  @Get(':buildId')
-  @ApiOperation({
-    summary: 'Get firmware info',
-    description: 'Retrieve detailed information about a specific firmware build',
-  })
-  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
-  @ApiResponse({
-    status: 200,
-    description: 'Firmware information retrieved successfully',
-  })
-  async getFirmwareInfo(@Param('buildId') buildId: string) {
-    const info = await this.firmwareService.getFirmwareInfo(buildId);
-
-    return {
-      success: true,
-      data: {
-        buildId,
-        ...info,
-      },
     };
   }
 

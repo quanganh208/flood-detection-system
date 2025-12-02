@@ -1168,15 +1168,12 @@
         }
 
         function resetBuildUI() {
-          buildBtn.disabled = false;
           buildBtn.innerHTML = '<i data-lucide="play" class="mr-2 h-4 w-4"></i>Build Firmware';
           cancelBtn.classList.add('hidden');
-          buildProgressSection.classList.add('hidden');
           progressBar.style.width = '0%';
           buildPhase.textContent = 'Initializing...';
           buildPercent.textContent = '0%';
           updateBuildButton();
-          updateStepIndicators();
           lucide.createIcons();
         }
 
@@ -1292,39 +1289,6 @@
                 'text-sm px-3 py-1.5 rounded-full bg-green-500/15 text-green-600 dark:text-green-400 font-medium';
 
               setTimeout(() => loadFirmwares(), 1000);
-
-              setTimeout(() => {
-                codeFiles = [];
-                configFile = null;
-                renderCodeFileList();
-                renderConfigFile();
-                updateStepIndicators();
-                updateBuildButton();
-
-                stepperUpload.classList.remove('completed');
-                stepperUpload.classList.add('pending');
-                stepperUpload.querySelector('.step-number').classList.remove('hidden');
-                stepperUpload.querySelector('.step-check').classList.add('hidden');
-
-                stepperBuild.classList.remove('completed');
-                stepperBuild.classList.add('pending');
-                stepperBuild.querySelector('.step-number').classList.remove('hidden');
-                stepperBuild.querySelector('.step-check').classList.add('hidden');
-                stepperBuild.querySelector('.stepper-circle').style.backgroundColor = '';
-                stepperBuild.querySelector('.stepper-circle').style.color = '';
-                stepperBuild.querySelector('.stepper-circle').style.borderColor = '';
-
-                stepperComplete.classList.remove('completed');
-                stepperComplete.classList.add('pending');
-                stepperComplete.querySelector('.step-number').classList.remove('hidden');
-                stepperComplete.querySelector('.step-check').classList.add('hidden');
-
-                buildStatusBadge.textContent = 'Waiting';
-                buildStatusBadge.className =
-                  'text-sm px-3 py-1.5 rounded-full bg-muted text-muted-foreground font-medium';
-
-                lucide.createIcons();
-              }, 3000);
             } else {
               updateProgress(100, 'failed', 'Build failed');
               showStatus(`Build failed after ${duration}s`, 'error');

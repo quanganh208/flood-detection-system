@@ -43,46 +43,7 @@ export class BuildStateService {
     this.states.set(buildId, updated);
   }
 
-  deleteState(buildId: string): void {
-    this.states.delete(buildId);
-  }
-
-  getAllActive(): BuildState[] {
-    const states = Array.from(this.states.values());
-    return states.filter(
-      (s) => s.status === BuildStatus.BUILDING || s.status === BuildStatus.QUEUED,
-    );
-  }
-
   getAllStates(): BuildState[] {
     return Array.from(this.states.values());
-  }
-
-  exists(buildId: string): boolean {
-    return this.states.has(buildId);
-  }
-
-  countByStatus(status: BuildStatus): number {
-    const states = Array.from(this.states.values());
-    return states.filter((s) => s.status === status).length;
-  }
-
-  cleanupOldBuilds(maxAge: number): number {
-    const now = Date.now();
-    let cleaned = 0;
-
-    for (const [buildId, state] of this.states.entries()) {
-      const completedAt = state.completedAt?.getTime();
-      if (completedAt && now - completedAt > maxAge) {
-        this.states.delete(buildId);
-        cleaned++;
-      }
-    }
-
-    if (cleaned > 0) {
-      this.logger.log(`Cleaned up ${cleaned} old builds`);
-    }
-
-    return cleaned;
   }
 }
