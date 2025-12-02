@@ -14,18 +14,66 @@ import {
   Req,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiBody,
+  ApiConsumes,
+} from '@nestjs/swagger';
 import { Observable } from 'rxjs';
 import type { Request } from 'express';
 import { FirmwareService } from './firmware.service';
 import { SseMessage } from './services/build-stream.service';
+import { UpdateMetadataDto } from './dto/update-metadata.dto';
 
-@Controller('api/firmware')
+@ApiTags('firmware')
+@Controller('firmware')
 export class FirmwareController {
   private readonly logger = new Logger(FirmwareController.name);
 
   constructor(private readonly firmwareService: FirmwareService) {}
 
   @Post('build/init')
+  @ApiOperation({
+    summary: 'Initialize firmware build',
+    description: 'Upload source files and initiate a new firmware build process',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    description: 'ESP32 source files for firmware compilation',
+    schema: {
+      type: 'object',
+      properties: {
+        files: {
+          type: 'array',
+          items: {
+            type: 'string',
+            format: 'binary',
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Build initiated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Build initiated' },
+        data: {
+          type: 'object',
+          properties: {
+            build_id: { type: 'string', example: 'abc123-def456-ghi789' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'No files uploaded' })
   @UseInterceptors(FilesInterceptor('files'))
   initBuild(@UploadedFiles() files: Express.Multer.File[]) {
     if (!files || files.length === 0) {
@@ -46,6 +94,15 @@ export class FirmwareController {
   }
 
   @Get('build/:buildId/status')
+  @ApiOperation({
+    summary: 'Get build status',
+    description: 'Retrieve current status of a firmware build',
+  })
+  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
+  @ApiResponse({
+    status: 200,
+    description: 'Build status retrieved successfully',
+  })
   getBuildStatus(@Param('buildId') buildId: string) {
     const status = this.firmwareService.getBuildStatus(buildId);
 
@@ -56,6 +113,22 @@ export class FirmwareController {
   }
 
   @Sse('build/:buildId/stream')
+  @ApiOperation({
+    summary: 'Stream build progress',
+    description: 'Server-Sent Events stream for real-time build progress updates',
+  })
+  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
+  @ApiResponse({
+    status: 200,
+    description: 'SSE stream established',
+    content: {
+      'text/event-stream': {
+        schema: {
+          type: 'string',
+        },
+      },
+    },
+  })
   streamBuildProgress(
     @Param('buildId') buildId: string,
     @Req() request: Request,
@@ -71,6 +144,15 @@ export class FirmwareController {
   }
 
   @Delete('build/:buildId/cancel')
+  @ApiOperation({
+    summary: 'Cancel build',
+    description: 'Cancel an in-progress firmware build',
+  })
+  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
+  @ApiResponse({
+    status: 200,
+    description: 'Build cancelled successfully',
+  })
   async cancelBuild(@Param('buildId') buildId: string) {
     await this.firmwareService.cancelBuild(buildId);
 
@@ -85,6 +167,14 @@ export class FirmwareController {
   }
 
   @Get()
+  @ApiOperation({
+    summary: 'List all firmwares',
+    description: 'Retrieve a list of all built firmwares',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of firmwares retrieved successfully',
+  })
   async listFirmwares() {
     const firmwares = await this.firmwareService.listFirmwares();
 
@@ -96,6 +186,15 @@ export class FirmwareController {
   }
 
   @Get(':buildId/build-log')
+  @ApiOperation({
+    summary: 'Get build log',
+    description: 'Retrieve the complete build log for a firmware build',
+  })
+  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
+  @ApiResponse({
+    status: 200,
+    description: 'Build log retrieved successfully',
+  })
   async getBuildLog(@Param('buildId') buildId: string) {
     const firmware = await this.firmwareService.getFirmwareInfo(buildId);
 
@@ -111,6 +210,15 @@ export class FirmwareController {
   }
 
   @Get(':buildId/source-files')
+  @ApiOperation({
+    summary: 'Get source files',
+    description: 'Retrieve the source files used for a firmware build',
+  })
+  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
+  @ApiResponse({
+    status: 200,
+    description: 'Source files retrieved successfully',
+  })
   async getSourceFiles(@Param('buildId') buildId: string) {
     const result = await this.firmwareService.getSourceFiles(buildId);
 
@@ -125,6 +233,15 @@ export class FirmwareController {
   }
 
   @Post(':buildId/promote')
+  @ApiOperation({
+    summary: 'Promote firmware to latest',
+    description: 'Mark a firmware build as the latest stable version for OTA updates',
+  })
+  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
+  @ApiResponse({
+    status: 200,
+    description: 'Firmware promoted successfully',
+  })
   async promoteToLatest(@Param('buildId') buildId: string) {
     await this.firmwareService.promoteToLatest(buildId);
 
@@ -136,10 +253,16 @@ export class FirmwareController {
   }
 
   @Patch(':buildId')
-  async updateMetadata(
-    @Param('buildId') buildId: string,
-    @Body() metadata: { version?: string; description?: string; releaseNotes?: string },
-  ) {
+  @ApiOperation({
+    summary: 'Update firmware metadata',
+    description: 'Update version, description, or release notes for a firmware build',
+  })
+  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
+  @ApiResponse({
+    status: 200,
+    description: 'Firmware metadata updated successfully',
+  })
+  async updateMetadata(@Param('buildId') buildId: string, @Body() metadata: UpdateMetadataDto) {
     const updated = await this.firmwareService.updateFirmwareMetadata(buildId, metadata);
 
     return {
@@ -150,6 +273,15 @@ export class FirmwareController {
   }
 
   @Get(':buildId')
+  @ApiOperation({
+    summary: 'Get firmware info',
+    description: 'Retrieve detailed information about a specific firmware build',
+  })
+  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
+  @ApiResponse({
+    status: 200,
+    description: 'Firmware information retrieved successfully',
+  })
   async getFirmwareInfo(@Param('buildId') buildId: string) {
     const info = await this.firmwareService.getFirmwareInfo(buildId);
 
@@ -163,6 +295,15 @@ export class FirmwareController {
   }
 
   @Delete(':buildId')
+  @ApiOperation({
+    summary: 'Delete firmware',
+    description: 'Delete a firmware build and all associated files',
+  })
+  @ApiParam({ name: 'buildId', description: 'Unique build identifier' })
+  @ApiResponse({
+    status: 200,
+    description: 'Firmware deleted successfully',
+  })
   async deleteFirmware(@Param('buildId') buildId: string) {
     await this.firmwareService.deleteFirmware(buildId);
 

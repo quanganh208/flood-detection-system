@@ -69,7 +69,7 @@ const unsigned long WIFI_RECONNECT_INTERVAL = 30000;  // 30 giây
 
 // Custom parameters (nếu cần thêm cấu hình khác)
 WiFiManagerParameter custom_device_name("device_name", "Tên thiết bị", "ESP32-Device-01", 40);
-WiFiManagerParameter custom_server_url("server", "Server URL", "http://172.20.10.2:3000", 100);
+WiFiManagerParameter custom_server_url("server", "Server URL", "http://192.168.1.19:3000", 100);
 
 // Biến trạng thái WiFi
 bool wasConnected = false;
