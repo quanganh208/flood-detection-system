@@ -82,8 +82,8 @@ int MQTT_PORT = 1883;
 String CURRENT_FIRMWARE_VERSION = FIRMWARE_VERSION;
 
 // Default values
-const char* DEFAULT_SERVER_URL = "https://38btvhxs-3000.asse.devtunnels.ms";
-const char* DEFAULT_MQTT_SERVER = "192.168.1.42";
+const char* DEFAULT_SERVER_URL = "https://iot.quanganh.me";
+const char* DEFAULT_MQTT_SERVER = "mqtt.quanganh.me";
 const char* DEFAULT_DISPLAY_NAME = "Unnamed Device";
 
 // WiFiManager parameters
@@ -236,11 +236,30 @@ void handleConfigUpdate(String message) {
 
   if (error) return;
 
-  // Update config if provided
+  bool configChanged = false;
+
+  // Update display name if provided
+  if (doc.containsKey("displayName")) {
+    String newName = doc["displayName"].as<String>();
+    if (newName.length() > 0 && newName != DISPLAY_NAME) {
+      DISPLAY_NAME = newName;
+      configChanged = true;
+      Serial.print("[Config] Display name updated: ");
+      Serial.println(DISPLAY_NAME);
+    }
+  }
+
+  // Update sensor interval if provided
   if (doc.containsKey("sensorInterval")) {
-    // Could update sensor interval dynamically
-    Serial.print("Config update - sensorInterval: ");
+    Serial.print("[Config] sensorInterval: ");
     Serial.println(doc["sensorInterval"].as<int>());
+  }
+
+  // Save to NVS if config changed
+  if (configChanged) {
+    saveDeviceConfig();
+    // Publish updated status
+    publishStatus("online");
   }
 }
 

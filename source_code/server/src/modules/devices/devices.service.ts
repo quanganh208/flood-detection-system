@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MqttService } from '../mqtt/mqtt.service';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 import { Device, Prisma } from '@prisma/client';
 
@@ -7,7 +8,10 @@ import { Device, Prisma } from '@prisma/client';
 export class DevicesService {
   private readonly logger = new Logger(DevicesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mqttService: MqttService,
+  ) {}
 
   /**
    * Get all devices with optional filtering
@@ -99,10 +103,18 @@ export class DevicesService {
 
     this.logger.log(`Updating device ${device.deviceId} with: ${JSON.stringify(updateDeviceDto)}`);
 
-    return this.prisma.device.update({
+    const updatedDevice = await this.prisma.device.update({
       where: { id: device.id },
       data: updateDeviceDto,
     });
+
+    if (updateDeviceDto.name && updateDeviceDto.name !== device.name) {
+      this.mqttService.publishConfig(device.deviceId, {
+        displayName: updateDeviceDto.name,
+      });
+    }
+
+    return updatedDevice;
   }
 
   /**

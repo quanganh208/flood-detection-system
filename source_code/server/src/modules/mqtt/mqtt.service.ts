@@ -216,4 +216,22 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`Failed to process device status: ${errMsg}`);
     }
   }
+
+  publishConfig(deviceId: string, config: { displayName?: string; sensorInterval?: number }): void {
+    if (!this.client || !this.isConnected) {
+      this.logger.warn(`Cannot publish config - MQTT not connected`);
+      return;
+    }
+
+    const topic = `flood/${deviceId}/config`;
+    const message = JSON.stringify(config);
+
+    this.client.publish(topic, message, { qos: 1 }, (err) => {
+      if (err) {
+        this.logger.error(`Failed to publish config to ${deviceId}: ${err.message}`);
+      } else {
+        this.logger.log(`Published config to ${deviceId}: ${message}`);
+      }
+    });
+  }
 }

@@ -86,6 +86,7 @@ CREATE TABLE "firmwares" (
     "buildId" TEXT NOT NULL,
     "version" TEXT NOT NULL,
     "sourceFiles" JSONB NOT NULL,
+    "sourceFileContents" JSONB,
     "configFile" TEXT,
     "buildLog" TEXT,
     "buildDuration" INTEGER,
