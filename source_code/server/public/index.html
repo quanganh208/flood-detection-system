@@ -341,8 +341,15 @@
     </style>
   </head>
   <body class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-    <!-- Theme Toggle -->
-    <div class="fixed top-4 right-4 z-50">
+    <!-- Theme Toggle & Navigation -->
+    <div class="fixed top-4 right-4 z-50 flex items-center gap-2">
+      <a
+        href="/devices.html"
+        class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4"
+      >
+        <i data-lucide="router" class="h-4 w-4 mr-2"></i>
+        Devices
+      </a>
       <button
         id="themeToggle"
         class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 w-10"

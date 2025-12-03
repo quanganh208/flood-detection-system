@@ -7,6 +7,7 @@ import { OtaModule } from './modules/ota/ota.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { SensorsModule } from './modules/sensors/sensors.module';
 import { MqttModule } from './modules/mqtt/mqtt.module';
+import { DevicesModule } from './modules/devices/devices.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { MqttModule } from './modules/mqtt/mqtt.module';
     OtaModule,
     SensorsModule,
     MqttModule,
+    DevicesModule,
   ],
   controllers: [],
   providers: [],
