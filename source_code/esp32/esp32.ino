@@ -58,7 +58,7 @@ const int CONFIG_PORTAL_TIMEOUT = 180;
 const unsigned long WIFI_RECONNECT_INTERVAL = 30000;
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000;
 const unsigned long OTA_CHECK_INTERVAL = 60000;
-const unsigned long SENSOR_READ_INTERVAL = 2000;
+const unsigned long SENSOR_READ_INTERVAL = 10000;
 const unsigned long STATUS_PRINT_INTERVAL = 30000;
 
 // ===== INSTANCES =====
@@ -378,7 +378,7 @@ bool checkForOTAUpdate() {
 
   http.begin(url);
   http.setTimeout(10000);
-
+  
   int httpCode = http.GET();
   Serial.print("HTTP Code: ");
   Serial.println(httpCode);
