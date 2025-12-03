@@ -8,6 +8,7 @@ import { PrismaModule } from './modules/prisma/prisma.module';
 import { SensorsModule } from './modules/sensors/sensors.module';
 import { MqttModule } from './modules/mqtt/mqtt.module';
 import { DevicesModule } from './modules/devices/devices.module';
+import { MobileModule } from './modules/mobile/mobile.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { DevicesModule } from './modules/devices/devices.module';
     SensorsModule,
     MqttModule,
     DevicesModule,
+    MobileModule,
   ],
   controllers: [],
   providers: [],

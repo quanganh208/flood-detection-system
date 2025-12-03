@@ -1,43 +1,60 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { RainStatus, WaterStatus } from '@prisma/client';
+import { RainStatus, WaterStatus, SensorReading } from '@prisma/client';
 import { SensorDataDto } from './dto/sensor-data.dto';
 import { formatMacAddress } from '../../common/utils';
 
 const RAIN_DRY_THRESHOLD = 3000;
 const RAIN_WARNING_THRESHOLD = 2000;
+const DEDUP_WINDOW_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class SensorsService {
-  private readonly logger = new Logger(SensorsService.name);
-
   constructor(private prisma: PrismaService) {}
 
   async processSensorData(data: SensorDataDto) {
-    this.logger.log(`Received sensor data from ${data.deviceId}`);
-
     const device = await this.findOrCreateDevice(data);
-
     const rainStatus = this.calculateRainStatus(data.rainAnalog);
     const waterStatus = this.calculateWaterStatus(data.waterLevel);
 
-    const reading = await this.prisma.sensorReading.create({
-      data: {
-        deviceId: device.id,
-        rainAnalog: data.rainAnalog,
-        rainDigital: data.rainDigital,
-        waterLevel: data.waterLevel,
-        rainStatus,
-        waterStatus,
-        rssi: data.rssi,
-      },
+    const latestReading = await this.prisma.sensorReading.findFirst({
+      where: { deviceId: device.id },
+      orderBy: { timestamp: 'desc' },
     });
+
+    let reading: SensorReading;
+    const now = new Date();
+
+    if (
+      latestReading &&
+      latestReading.rainAnalog === data.rainAnalog &&
+      latestReading.rainDigital === data.rainDigital &&
+      latestReading.waterLevel === data.waterLevel &&
+      now.getTime() - latestReading.timestamp.getTime() < DEDUP_WINDOW_MS
+    ) {
+      reading = await this.prisma.sensorReading.update({
+        where: { id: latestReading.id },
+        data: { timestamp: now, rssi: data.rssi },
+      });
+    } else {
+      reading = await this.prisma.sensorReading.create({
+        data: {
+          deviceId: device.id,
+          rainAnalog: data.rainAnalog,
+          rainDigital: data.rainDigital,
+          waterLevel: data.waterLevel,
+          rainStatus,
+          waterStatus,
+          rssi: data.rssi,
+        },
+      });
+    }
 
     await this.prisma.device.update({
       where: { id: device.id },
       data: {
         isOnline: true,
-        lastHeartbeat: new Date(),
+        lastHeartbeat: now,
         ipAddress: data.ip,
         rssi: data.rssi,
         firmwareVersion: data.firmwareVersion || device.firmwareVersion,
@@ -62,9 +79,7 @@ export class SensorsService {
       where: { deviceId: data.deviceId },
     });
 
-    if (device) {
-      return device;
-    }
+    if (device) return device;
 
     device = await this.prisma.device.findFirst({
       where: { macAddress },
@@ -81,8 +96,6 @@ export class SensorsService {
     }
 
     const displayName = data.displayName || `Device-${data.deviceId.slice(-6)}`;
-
-    this.logger.log(`Creating new device: ${data.deviceId} (${macAddress}) - "${displayName}"`);
 
     device = await this.prisma.device.create({
       data: {
@@ -101,27 +114,17 @@ export class SensorsService {
   }
 
   private calculateRainStatus(rainAnalog: number): RainStatus {
-    if (rainAnalog >= RAIN_DRY_THRESHOLD) {
-      return RainStatus.DRY;
-    } else if (rainAnalog >= RAIN_WARNING_THRESHOLD) {
-      return RainStatus.LIGHT;
-    } else {
-      return RainStatus.HEAVY;
-    }
+    if (rainAnalog >= RAIN_DRY_THRESHOLD) return RainStatus.DRY;
+    if (rainAnalog >= RAIN_WARNING_THRESHOLD) return RainStatus.LIGHT;
+    return RainStatus.HEAVY;
   }
 
   private calculateWaterStatus(waterLevel: number): WaterStatus {
-    if (waterLevel < 683) {
-      return WaterStatus.SAFE;
-    } else if (waterLevel < 1365) {
-      return WaterStatus.LOW;
-    } else if (waterLevel < 2048) {
-      return WaterStatus.WARNING;
-    } else if (waterLevel < 3413) {
-      return WaterStatus.DANGER;
-    } else {
-      return WaterStatus.CRITICAL;
-    }
+    if (waterLevel < 683) return WaterStatus.SAFE;
+    if (waterLevel < 1365) return WaterStatus.LOW;
+    if (waterLevel < 2048) return WaterStatus.WARNING;
+    if (waterLevel < 3413) return WaterStatus.DANGER;
+    return WaterStatus.CRITICAL;
   }
 
   private async checkAndCreateAlerts(
@@ -170,9 +173,7 @@ export class SensorsService {
           deviceId: deviceDbId,
           type: alert.type,
           isResolved: false,
-          createdAt: {
-            gte: new Date(Date.now() - 5 * 60 * 1000),
-          },
+          createdAt: { gte: new Date(Date.now() - DEDUP_WINDOW_MS) },
         },
       });
 
@@ -187,8 +188,6 @@ export class SensorsService {
             rainAnalog: data.rainAnalog,
           },
         });
-
-        this.logger.warn(`Alert created: ${alert.type} - ${alert.message}`);
       }
     }
   }
@@ -221,7 +220,6 @@ export class SensorsService {
 
     if (!device) {
       const displayName = data.displayName || `Device-${data.deviceId.slice(-6)}`;
-      this.logger.log(`Creating new device from status: ${data.deviceId}`);
 
       device = await this.prisma.device.create({
         data: {
@@ -263,8 +261,6 @@ export class SensorsService {
         updateData.name = data.displayName;
       }
     }
-
-    this.logger.log(`Updating device ${data.deviceId}: ${JSON.stringify(updateData)}`);
 
     return this.prisma.device.update({
       where: { id: device.id },

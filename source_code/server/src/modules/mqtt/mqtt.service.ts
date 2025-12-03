@@ -154,7 +154,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           await this.handleSensorData(deviceId, message);
           break;
         case 'status':
-          this.handleDeviceStatus(deviceId, message);
+          await this.handleDeviceStatus(deviceId, message);
           break;
         default:
           this.logger.warn(`Unknown message type: ${messageType}`);
