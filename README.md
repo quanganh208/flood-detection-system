@@ -26,8 +26,8 @@ This system monitors water levels and rainfall using ESP32-based IoT devices, pr
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         CLIENT LAYER                                │
+┌────────────────────────────────────────────────────────────────────┐
+│                         CLIENT LAYER                               │
 ├─────────────────────────┬───────────────────┬──────────────────────┤
 │  Web Dashboard          │  Mobile App       │  ESP32 Devices       │
 │  - Firmware Builder     │  (Android/Kotlin) │  - Rain Sensors      │
@@ -37,7 +37,7 @@ This system monitors water levels and rainfall using ESP32-based IoT devices, pr
            │ HTTP/REST              │ HTTP/REST          │ MQTT
            │                        │                    │
 ┌──────────▼────────────────────────▼────────────────────▼───────────┐
-│                      APPLICATION LAYER                              │
+│                      APPLICATION LAYER                             │
 │  NestJS Server (Port 3000)                                         │
 │  ┌─────────────┬─────────────┬─────────────┬─────────────────────┐ │
 │  │ Devices API │ Firmware    │ OTA API     │ Mobile API          │ │
@@ -53,15 +53,15 @@ This system monitors water levels and rainfall using ESP32-based IoT devices, pr
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Backend | NestJS 11, TypeScript, Prisma ORM |
-| Database | PostgreSQL 16 |
-| Message Broker | Eclipse Mosquitto (MQTT) |
-| Firmware Builder | Python Flask, PlatformIO |
-| IoT Device | ESP32, Arduino Framework |
-| Mobile | Android (Kotlin), Jetpack Compose |
-| Infrastructure | Docker, Docker Compose |
+| Layer            | Technology                        |
+| ---------------- | --------------------------------- |
+| Backend          | NestJS 11, TypeScript, Prisma ORM |
+| Database         | PostgreSQL 16                     |
+| Message Broker   | Eclipse Mosquitto (MQTT)          |
+| Firmware Builder | Python Flask, PlatformIO          |
+| IoT Device       | ESP32, Arduino Framework          |
+| Mobile           | Android (Kotlin), Jetpack Compose |
+| Infrastructure   | Docker, Docker Compose            |
 
 ## Prerequisites
 
@@ -113,12 +113,12 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ### 4. Access the Application
 
-| Service | URL |
-|---------|-----|
-| Web Dashboard | http://localhost:3000 |
-| API Documentation | http://localhost:3000/api/docs |
-| Firmware Builder | http://localhost:3000/firmware.html |
-| Device Management | http://localhost:3000/devices.html |
+| Service           | URL                                 |
+| ----------------- | ----------------------------------- |
+| Web Dashboard     | http://localhost:3000               |
+| API Documentation | http://localhost:3000/api/docs      |
+| Firmware Builder  | http://localhost:3000/firmware.html |
+| Device Management | http://localhost:3000/devices.html  |
 
 ## Project Structure
 
@@ -155,38 +155,38 @@ Full API documentation is available at `/api/docs` (Swagger UI).
 
 #### Devices
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/devices` | List all devices |
-| GET | `/api/devices/stats` | Get device statistics |
-| GET | `/api/devices/:id` | Get device details |
-| PATCH | `/api/devices/:id` | Update device |
-| DELETE | `/api/devices/:id` | Delete device |
+| Method | Endpoint             | Description           |
+| ------ | -------------------- | --------------------- |
+| GET    | `/api/devices`       | List all devices      |
+| GET    | `/api/devices/stats` | Get device statistics |
+| GET    | `/api/devices/:id`   | Get device details    |
+| PATCH  | `/api/devices/:id`   | Update device         |
+| DELETE | `/api/devices/:id`   | Delete device         |
 
 #### Firmware
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/firmware/build/init` | Initialize firmware build |
-| GET | `/api/firmware/build/:id/stream` | Stream build progress (SSE) |
-| GET | `/api/firmware` | List all firmwares |
-| POST | `/api/firmware/:id/promote` | Promote to latest |
+| Method | Endpoint                         | Description                 |
+| ------ | -------------------------------- | --------------------------- |
+| POST   | `/api/firmware/build/init`       | Initialize firmware build   |
+| GET    | `/api/firmware/build/:id/stream` | Stream build progress (SSE) |
+| GET    | `/api/firmware`                  | List all firmwares          |
+| POST   | `/api/firmware/:id/promote`      | Promote to latest           |
 
 #### OTA Updates
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/ota/check/:deviceId` | Check for updates |
-| GET | `/api/ota/download/:buildId` | Download firmware |
-| POST | `/api/ota/verify/:deviceId` | Verify update |
+| Method | Endpoint                     | Description       |
+| ------ | ---------------------------- | ----------------- |
+| GET    | `/api/ota/check/:deviceId`   | Check for updates |
+| GET    | `/api/ota/download/:buildId` | Download firmware |
+| POST   | `/api/ota/verify/:deviceId`  | Verify update     |
 
 #### Mobile
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/mobile/map-data` | Get map data with ETag |
-| GET | `/api/mobile/alerts` | Get active alerts |
-| PATCH | `/api/mobile/alerts/:id/resolve` | Resolve alert |
+| Method | Endpoint                         | Description            |
+| ------ | -------------------------------- | ---------------------- |
+| GET    | `/api/mobile/map-data`           | Get map data with ETag |
+| GET    | `/api/mobile/alerts`             | Get active alerts      |
+| PATCH  | `/api/mobile/alerts/:id/resolve` | Resolve alert          |
 
 ## MQTT Topics
 
@@ -219,11 +219,11 @@ flood/broadcast/ota        # Broadcast OTA to all devices
 
 ### Pin Configuration
 
-| Component | GPIO Pin |
-|-----------|----------|
-| Rain Sensor | GPIO 34 (ADC1_CH6) |
+| Component          | GPIO Pin           |
+| ------------------ | ------------------ |
+| Rain Sensor        | GPIO 34 (ADC1_CH6) |
 | Water Level Sensor | GPIO 35 (ADC1_CH7) |
-| Status LED | GPIO 2 (Built-in) |
+| Status LED         | GPIO 2 (Built-in)  |
 
 ### Flashing Firmware
 
@@ -246,14 +246,14 @@ pio run --target upload
 
 Connect via Serial Monitor (115200 baud):
 
-| Command | Description |
-|---------|-------------|
-| `status` | Display current device status |
-| `ota` | Trigger OTA update check |
-| `reset` | Restart device |
-| `setmqtt <broker>` | Set MQTT broker URL |
-| `setserver <url>` | Set server URL |
-| `clearnvs` | Clear stored settings |
+| Command            | Description                   |
+| ------------------ | ----------------------------- |
+| `status`           | Display current device status |
+| `ota`              | Trigger OTA update check      |
+| `reset`            | Restart device                |
+| `setmqtt <broker>` | Set MQTT broker URL           |
+| `setserver <url>`  | Set server URL                |
+| `clearnvs`         | Clear stored settings         |
 
 ## Development
 
@@ -323,13 +323,13 @@ docker-compose -f docker-compose.prod.yml down
 
 ### Environment Variables (Production)
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | Required |
-| `MQTT_BROKER_URL` | MQTT broker URL | `mqtt://mosquitto:1883` |
-| `PLATFORMIO_BUILDER_URL` | PlatformIO builder URL | `http://platformio-builder:5001` |
-| `PORT` | Server port | `3000` |
-| `NODE_ENV` | Environment | `production` |
+| Variable                 | Description                  | Default                          |
+| ------------------------ | ---------------------------- | -------------------------------- |
+| `DATABASE_URL`           | PostgreSQL connection string | Required                         |
+| `MQTT_BROKER_URL`        | MQTT broker URL              | `mqtt://mosquitto:1883`          |
+| `PLATFORMIO_BUILDER_URL` | PlatformIO builder URL       | `http://platformio-builder:5001` |
+| `PORT`                   | Server port                  | `3000`                           |
+| `NODE_ENV`               | Environment                  | `production`                     |
 
 ## Mobile App
 
@@ -380,6 +380,7 @@ APK location: `Android/app/build/outputs/apk/debug/app-debug.apk`
 ### Common Issues
 
 **Docker containers won't start**
+
 ```bash
 # Check logs
 docker-compose logs -f
@@ -390,6 +391,7 @@ docker-compose up -d
 ```
 
 **Database connection failed**
+
 ```bash
 # Verify PostgreSQL is running
 docker-compose ps
@@ -398,6 +400,7 @@ docker-compose ps
 ```
 
 **MQTT connection issues**
+
 ```bash
 # Test MQTT broker
 mosquitto_pub -h localhost -t test -m "hello"
@@ -405,6 +408,7 @@ mosquitto_sub -h localhost -t test
 ```
 
 **ESP32 not connecting**
+
 - Check WiFi credentials in WiFiManager portal
 - Verify MQTT broker is accessible from device network
 - Check serial output for error messages
