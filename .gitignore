@@ -4,3 +4,25 @@
 # IDE
 .vscode/
 .idea/
+
+# Node
+node_modules/
+dist/
+.env.local
+
+# Storage (inside source_code)
+source_code/storage/firmware/*.bin
+source_code/storage/uploads/*
+source_code/storage/builds/*
+source_code/storage/mosquitto/data/*
+source_code/storage/mosquitto/log/*
+source_code/storage/postgres/*
+
+# Keep directories
+!source_code/storage/firmware/.gitkeep
+!source_code/storage/uploads/.gitkeep
+!source_code/storage/builds/.gitkeep
+
+# Logs
+*.log
+npm-debug.log*

@@ -1,0 +1,314 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ===== DEVICE MANAGEMENT =====
+
+model Device {
+  id                String      @id @default(uuid())
+  deviceId          String      @unique // Custom ID from ESP32 (e.g., "ESP32-Device-01")
+  name              String      // Display name
+  description       String?
+  location          String?     // Text location (e.g., "River X, District Y")
+  latitude          Float?      // GPS coordinate for map display
+  longitude         Float?      // GPS coordinate for map display
+
+  // Network info
+  macAddress        String      @unique
+  ipAddress         String?
+  wifiSSID          String?
+  rssi              Int?        // WiFi signal strength (dBm)
+
+  // Status
+  firmwareVersion   String      @default("1.0.0")
+  isOnline          Boolean     @default(false)
+  isActive          Boolean     @default(true)  // Manual enable/disable
+  lastHeartbeat     DateTime    @default(now())
+  uptime            Int         @default(0)     // Seconds
+
+  // Hardware info
+  chipModel         String?     // ESP32, ESP32-S2, ESP32-C3, etc.
+  freeHeap          Int?        // Free heap memory in bytes
+  flashSize         Int?        // Flash size in bytes
+
+  // Timestamps
+  registeredAt      DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  // Relations
+  sensorReadings    SensorReading[]
+  alerts            Alert[]
+  otaUpdates        OTAUpdate[]
+
+  @@index([deviceId])
+  @@index([macAddress])
+  @@index([isOnline, isActive])
+  @@index([lastHeartbeat])
+  @@index([latitude, longitude])
+  @@map("devices")
+}
+
+// ===== SENSOR DATA =====
+
+model SensorReading {
+  id              String      @id @default(uuid())
+
+  // ACTUAL sensor data from ESP32
+  rainAnalog      Int         // GPIO 34: 0-4095 (inverted: high=dry, low=wet)
+  rainDigital     Boolean     // GPIO 25: true=no rain, false=rain
+  waterLevel      Int         // GPIO 35: 0-2000 (giá trị thực tế của cảm biến)
+
+  // Calculated status (based on hardcoded thresholds in ESP32)
+  rainStatus      RainStatus
+  waterStatus     WaterStatus
+
+  // Metadata
+  rssi            Int?        // WiFi signal when reading was taken
+  timestamp       DateTime    @default(now())
+
+  // Relation
+  device          Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId        String
+
+  @@index([deviceId, timestamp])
+  @@index([timestamp])
+  @@index([waterStatus])
+  @@map("sensor_readings")
+}
+
+// ===== ALERTS =====
+
+model Alert {
+  id              String          @id @default(uuid())
+  type            AlertType
+  severity        AlertSeverity
+  message         String
+
+  // Sensor values at alert time
+  waterLevel      Int?
+  rainAnalog      Int?
+
+  // Alert lifecycle
+  isResolved      Boolean         @default(false)
+  resolvedAt      DateTime?
+  createdAt       DateTime        @default(now())
+
+  // Relation
+  device          Device          @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId        String
+
+  @@index([deviceId, createdAt])
+  @@index([isResolved])
+  @@index([severity])
+  @@map("alerts")
+}
+
+// ===== FIRMWARE MANAGEMENT =====
+
+model Firmware {
+  id              String          @id @default(uuid())
+  buildId         String          @unique // UUID from build system
+  version         String          // Semantic version (e.g., "1.2.3")
+
+  // Build information
+  sourceFiles        Json            // Array of uploaded file names
+  sourceFileContents Json?           // Array of {name, content, path} for source files
+  configFile         String?         @db.Text // platformio.ini content
+  buildLog           String?         @db.Text // Complete build log
+  buildDuration      Int?            // Build time in milliseconds
+  buildStatus        BuildStatus     @default(PENDING)
+
+  // File information
+  filePath        String          // Physical file location
+  fileSize        Int
+  md5Checksum     String
+
+  // Metadata
+  description     String?
+  releaseNotes    String?         @db.Text
+
+  // Deployment control
+  isLatest        Boolean         @default(false) // Current production version
+
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  publishedAt     DateTime?       // When made available for OTA
+
+  // Relations
+  deployments     Deployment[]
+  otaUpdates      OTAUpdate[]
+
+  @@index([buildId])
+  @@index([version])
+  @@index([isLatest])
+  @@index([buildStatus])
+  @@index([createdAt])
+  @@map("firmwares")
+}
+
+model Deployment {
+  id              String          @id @default(uuid())
+
+  // Deployment strategy
+  strategy        DeployStrategy  @default(MANUAL)
+  targetDevices   Json?           // Array of device IDs or "ALL"
+  rolloutPercent  Int             @default(100) // For gradual rollout
+
+  // Deployment status
+  status          DeployStatus    @default(PENDING)
+  totalDevices    Int             @default(0)
+  successCount    Int             @default(0)
+  failureCount    Int             @default(0)
+  pendingCount    Int             @default(0)
+
+  // Scheduling
+  scheduledAt     DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  // Relations
+  firmware        Firmware        @relation(fields: [firmwareId], references: [id], onDelete: Cascade)
+  firmwareId      String
+  otaUpdates      OTAUpdate[]
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([status])
+  @@index([firmwareId])
+  @@map("deployments")
+}
+
+model OTAUpdate {
+  id              String          @id @default(uuid())
+
+  // Version information
+  fromVersion     String          // Current device version
+  toVersion       String          // Target version
+
+  // Update process
+  status          OTAStatus       @default(PENDING)
+  progress        Int             @default(0) // Download progress 0-100
+  attempt         Int             @default(1) // Retry count
+  maxAttempts     Int             @default(3)
+
+  // Results
+  success         Boolean         @default(false)
+  errorCode       String?
+  errorMessage    String?
+
+  // Performance metrics
+  downloadTime    Int?            // milliseconds
+  installTime     Int?            // milliseconds
+  totalTime       Int?            // milliseconds
+  bytesDownloaded Int?
+
+  // Verification
+  checksumMatch   Boolean?
+  rollbackReason  String?
+
+  // Timestamps
+  initiatedAt     DateTime        @default(now())
+  downloadedAt    DateTime?
+  installedAt     DateTime?
+  verifiedAt      DateTime?
+  completedAt     DateTime?
+
+  // Relations
+  device          Device          @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId        String
+  firmware        Firmware        @relation(fields: [firmwareId], references: [id], onDelete: Cascade)
+  firmwareId      String
+  deployment      Deployment?     @relation(fields: [deploymentId], references: [id])
+  deploymentId    String?
+
+  @@index([deviceId, initiatedAt])
+  @@index([status])
+  @@index([firmwareId])
+  @@index([deploymentId])
+  @@map("ota_updates")
+}
+
+// ===== ENUMS =====
+
+// Rain sensor (INVERTED: high value = dry, low value = wet)
+enum RainStatus {
+  DRY           // rainAnalog >= 3000 (Khô ráo, không mưa hoặc mưa phùn)
+  LIGHT         // 2000 <= rainAnalog < 3000 (Mưa nhẹ đến vừa, bề mặt bắt đầu ẩm)
+  HEAVY         // rainAnalog < 2000 (Mưa to/lớn, bề mặt rất ướt)
+}
+
+// Water level for street flooding (max sensor value ~2000)
+enum WaterStatus {
+  SAFE          // 0-400 ADC (0-20%): An toàn, xe cộ lưu thông bình thường
+  LOW           // 400-800 ADC (20-40%): Ngập nhẹ, xe máy cẩn thận
+  WARNING       // 800-1200 ADC (40-60%): Xe máy khó đi, ô tô mất lực bám
+  DANGER        // 1200-1600 ADC (60-80%): Đóng đường, xe máy chết máy
+  CRITICAL      // >=1600 ADC (80-100%): Xe nhỏ bắt đầu nổi, rất nguy hiểm
+}
+
+enum AlertType {
+  WATER_WARNING
+  WATER_DANGER
+  HEAVY_RAIN
+  DEVICE_OFFLINE
+  SENSOR_ERROR
+  OTA_FAILED
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Build status
+enum BuildStatus {
+  PENDING
+  QUEUED
+  BUILDING
+  TESTING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// OTA update status
+enum OTAStatus {
+  PENDING
+  CHECKING
+  DOWNLOADING
+  VERIFYING
+  INSTALLING
+  REBOOTING
+  COMPLETED
+  FAILED
+  ROLLED_BACK
+  CANCELLED
+}
+
+// Deployment strategy
+enum DeployStrategy {
+  MANUAL          // Admin manually selects devices
+  ALL_DEVICES     // Deploy to all online devices
+  GRADUAL         // Percentage-based rollout
+  CANARY          // Deploy to test devices first
+  SCHEDULED       // Deploy at specific time
+}
+
+// Deployment status
+enum DeployStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+  ROLLED_BACK
+}

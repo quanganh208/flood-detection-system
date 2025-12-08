@@ -1,0 +1,93 @@
+services:
+  # NestJS Server - Main API
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: flood-server
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - MQTT_BROKER_URL=mqtt://mosquitto:1883
+      - PLATFORMIO_BUILDER_URL=http://platformio-builder:5000
+      - DATABASE_URL=postgresql://flood_user:flood_password@postgres:5432/flood_detection?schema=public
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+      - firmware-storage:/storage/firmware
+      - uploads-storage:/storage/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      platformio-builder:
+        condition: service_started
+    networks:
+      - flood-network
+    restart: unless-stopped
+
+  # PlatformIO Builder Service
+  platformio-builder:
+    build:
+      context: ./docker/platformio-builder
+      dockerfile: Dockerfile
+    container_name: platformio-builder
+    ports:
+      - "5001:5000"
+    volumes:
+      - platformio-builds:/builds
+      - platformio-cache:/root/.platformio
+    networks:
+      - flood-network
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: flood-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=flood_user
+      - POSTGRES_PASSWORD=flood_password
+      - POSTGRES_DB=flood_detection
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - flood-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flood_user -d flood_detection"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MQTT Broker
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    networks:
+      - flood-network
+    restart: unless-stopped
+    command: mosquitto -c /mosquitto-no-auth.conf
+
+networks:
+  flood-network:
+    driver: bridge
+
+volumes:
+  platformio-cache:
+  platformio-builds:
+  postgres-data:
+  firmware-storage:
+  uploads-storage:
+  mosquitto-config:
+  mosquitto-data:
+  mosquitto-log:
