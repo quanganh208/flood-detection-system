@@ -144,19 +144,19 @@ export class SensorsService {
       alerts.push({
         type: 'WATER_DANGER',
         severity: 'CRITICAL',
-        message: `Muc nuoc cuc ky nguy hiem: ${data.waterLevel} (>=1600, >80%)`,
+        message: `🚨 NGUY HIỂM! Mực nước rất cao, có nguy cơ ngập nặng. Hãy di chuyển đến nơi an toàn ngay!`,
       });
     } else if (waterStatus === WaterStatus.DANGER) {
       alerts.push({
         type: 'WATER_DANGER',
         severity: 'HIGH',
-        message: `Muc nuoc nguy hiem: ${data.waterLevel} (1200-1600, 60-80%)`,
+        message: `⚠️ Mực nước đang ở mức nguy hiểm. Tránh di chuyển qua khu vực này, đặc biệt với xe máy.`,
       });
     } else if (waterStatus === WaterStatus.WARNING) {
       alerts.push({
         type: 'WATER_WARNING',
         severity: 'MEDIUM',
-        message: `Canh bao muc nuoc: ${data.waterLevel} (800-1200, 40-60%)`,
+        message: `⚡ Cảnh báo: Mực nước đang tăng. Hãy cẩn thận khi di chuyển và theo dõi tình hình.`,
       });
     }
 
@@ -164,7 +164,7 @@ export class SensorsService {
       alerts.push({
         type: 'HEAVY_RAIN',
         severity: 'MEDIUM',
-        message: `Mua lon: ${data.rainAnalog} (<${RAIN_WARNING_THRESHOLD})`,
+        message: `🌧️ Đang có mưa to. Cẩn thận đường trơn trượt và có thể gây ngập cục bộ.`,
       });
     }
 
