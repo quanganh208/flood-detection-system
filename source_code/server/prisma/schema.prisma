@@ -235,6 +235,21 @@ model OTAUpdate {
   @@map("ota_updates")
 }
 
+// ===== FCM TOKENS =====
+
+model FcmToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  isActive  Boolean  @default(true)
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@map("fcm_tokens")
+}
+
 // ===== ENUMS =====
 
 // Rain sensor (INVERTED: high value = dry, low value = wet)
