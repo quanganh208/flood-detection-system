@@ -4,9 +4,10 @@ import * as admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
-import { RegisterTokenDto, Platform } from './dto/register-token.dto';
+import { RegisterTokenDto } from './dto/register-token.dto';
 import { UpdatePreferencesDto } from './dto/update-preferences.dto';
-import { Platform as PrismaPlatform } from '@prisma/client';
+
+const NOTIFY_RADIUS_KM = 10;
 
 export interface AlertNotificationData {
   alertId: string;
@@ -75,8 +76,6 @@ export class FcmService implements OnModuleInit {
   }
 
   async registerToken(dto: RegisterTokenDto) {
-    const platform = (dto.platform || Platform.ANDROID) as PrismaPlatform;
-
     const existingToken = await this.prisma.fcmToken.findUnique({
       where: { token: dto.token },
     });
@@ -85,18 +84,9 @@ export class FcmService implements OnModuleInit {
       return this.prisma.fcmToken.update({
         where: { token: dto.token },
         data: {
-          platform,
-          deviceModel: dto.deviceModel ?? existingToken.deviceModel,
-          osVersion: dto.osVersion ?? existingToken.osVersion,
-          appVersion: dto.appVersion ?? existingToken.appVersion,
-          userId: dto.userId ?? existingToken.userId,
-          subscribedToAlerts: dto.subscribedToAlerts ?? existingToken.subscribedToAlerts,
-          subscribedToNews: dto.subscribedToNews ?? existingToken.subscribedToNews,
           latitude: dto.latitude ?? existingToken.latitude,
           longitude: dto.longitude ?? existingToken.longitude,
-          notifyRadius: dto.notifyRadius ?? existingToken.notifyRadius,
           isActive: true,
-          lastUsedAt: new Date(),
         },
       });
     }
@@ -104,16 +94,8 @@ export class FcmService implements OnModuleInit {
     return this.prisma.fcmToken.create({
       data: {
         token: dto.token,
-        platform,
-        deviceModel: dto.deviceModel,
-        osVersion: dto.osVersion,
-        appVersion: dto.appVersion,
-        userId: dto.userId,
-        subscribedToAlerts: dto.subscribedToAlerts ?? true,
-        subscribedToNews: dto.subscribedToNews ?? false,
         latitude: dto.latitude,
         longitude: dto.longitude,
-        notifyRadius: dto.notifyRadius ?? 5.0,
       },
     });
   }
@@ -139,12 +121,8 @@ export class FcmService implements OnModuleInit {
     return this.prisma.fcmToken.update({
       where: { token },
       data: {
-        subscribedToAlerts: dto.subscribedToAlerts,
-        subscribedToNews: dto.subscribedToNews,
         latitude: dto.latitude,
         longitude: dto.longitude,
-        notifyRadius: dto.notifyRadius,
-        lastUsedAt: new Date(),
       },
     });
   }
@@ -291,24 +269,14 @@ export class FcmService implements OnModuleInit {
   }
 
   private async getSubscribedTokens(alertData: AlertNotificationData): Promise<string[]> {
-    const baseCondition = {
-      isActive: true,
-      subscribedToAlerts: true,
-    };
-
     if (alertData.latitude && alertData.longitude) {
       const tokensWithLocation = await this.prisma.fcmToken.findMany({
         where: {
-          ...baseCondition,
+          isActive: true,
           latitude: { not: null },
           longitude: { not: null },
         },
-        select: {
-          token: true,
-          latitude: true,
-          longitude: true,
-          notifyRadius: true,
-        },
+        select: { token: true, latitude: true, longitude: true },
       });
 
       const nearbyTokens = tokensWithLocation.filter((t) => {
@@ -318,14 +286,11 @@ export class FcmService implements OnModuleInit {
           alertData.latitude!,
           alertData.longitude!,
         );
-        return distance <= (t.notifyRadius || 5);
+        return distance <= NOTIFY_RADIUS_KM;
       });
 
       const tokensWithoutLocation = await this.prisma.fcmToken.findMany({
-        where: {
-          ...baseCondition,
-          latitude: null,
-        },
+        where: { isActive: true, latitude: null },
         select: { token: true },
       });
 
@@ -333,7 +298,7 @@ export class FcmService implements OnModuleInit {
     }
 
     const allTokens = await this.prisma.fcmToken.findMany({
-      where: baseCondition,
+      where: { isActive: true },
       select: { token: true },
     });
 
@@ -394,27 +359,15 @@ export class FcmService implements OnModuleInit {
   }
 
   async getStats() {
-    const [total, active, byPlatform] = await Promise.all([
+    const [total, active] = await Promise.all([
       this.prisma.fcmToken.count(),
       this.prisma.fcmToken.count({ where: { isActive: true } }),
-      this.prisma.fcmToken.groupBy({
-        by: ['platform'],
-        where: { isActive: true },
-        _count: true,
-      }),
     ]);
 
     return {
       total,
       active,
       inactive: total - active,
-      byPlatform: byPlatform.reduce(
-        (acc, item) => {
-          acc[item.platform] = item._count;
-          return acc;
-        },
-        {} as Record<string, number>,
-      ),
     };
   }
 }

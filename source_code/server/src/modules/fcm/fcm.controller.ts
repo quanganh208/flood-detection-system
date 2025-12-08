@@ -35,11 +35,7 @@ export class FcmController {
     return {
       success: true,
       message: 'Token registered successfully',
-      data: {
-        id: result.id,
-        subscribedToAlerts: result.subscribedToAlerts,
-        subscribedToNews: result.subscribedToNews,
-      },
+      data: { id: result.id },
     };
   }
 
@@ -63,8 +59,8 @@ export class FcmController {
 
   @Patch('preferences/:token')
   @ApiOperation({
-    summary: 'Update notification preferences',
-    description: 'Update notification subscription settings for a token',
+    summary: 'Update location preferences',
+    description: 'Update location for a token',
   })
   @ApiParam({
     name: 'token',
@@ -80,11 +76,8 @@ export class FcmController {
       success: true,
       message: 'Preferences updated successfully',
       data: {
-        subscribedToAlerts: result.subscribedToAlerts,
-        subscribedToNews: result.subscribedToNews,
         latitude: result.latitude,
         longitude: result.longitude,
-        notifyRadius: result.notifyRadius,
       },
     };
   }
