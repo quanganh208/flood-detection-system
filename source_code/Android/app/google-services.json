@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "372654280824",
+    "project_id": "flood-detection-d120b",
+    "storage_bucket": "flood-detection-d120b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:372654280824:android:3c4823a4b3adb2e1025d8d",
+        "android_client_info": {
+          "package_name": "com.example.raindetected"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBj6D-bTaqHP9cpZaVUjCuPpZ-87fXbQYE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

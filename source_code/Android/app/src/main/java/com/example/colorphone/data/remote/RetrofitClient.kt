@@ -6,7 +6,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
 object RetrofitClient {
-    private const val BASE_URL = "https://iot.quanganh.me/api/mobile/"
+    private const val BASE_URL = "https://iot.quanganh.me/api/"
 
     private val moshi = Moshi.Builder()
         .add(StatusMoshiAdapter())

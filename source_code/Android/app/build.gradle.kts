@@ -4,6 +4,7 @@ plugins {
 //    kotlin("kapt")
     id("com.google.devtools.ksp")
     id("kotlin-parcelize")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -11,7 +12,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.colorphone"
+        applicationId = "com.example.raindetected"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
@@ -82,4 +83,11 @@ dependencies {
 
     implementation("com.google.android.gms:play-services-location:21.0.1")
 
+    implementation(platform("com.google.firebase:firebase-bom:32.7.0")) // Kiểm tra version mới nhất
+
+    // Firebase Cloud Messaging
+    implementation("com.google.firebase:firebase-messaging-ktx")
+
+    // Analytics (Tùy chọn, nhưng thường được dùng chung)
+    implementation("com.google.firebase:firebase-analytics-ktx")
 }

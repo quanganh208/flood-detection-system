@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.example.colorphone.data.remote.RetrofitClient
 import com.example.colorphone.data.remote.dto.AlertItem
 import com.example.colorphone.data.remote.dto.AlertsResponse
+import com.example.colorphone.data.remote.dto.LocationUpdateRequest
 import com.example.colorphone.data.remote.dto.toDomainList
 import com.example.colorphone.domain.models.DeviceModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -25,7 +27,12 @@ class MainViewmodel : ViewModel() {
 
 
     init {
-        getInitData()
+        viewModelScope.launch {
+            while (true) {
+                getInitData()
+                delay(5000)
+            }
+        }
     }
 
     private fun getInitData() {
@@ -51,4 +58,17 @@ class MainViewmodel : ViewModel() {
         }
 
     }
+
+    fun updateFcm(fcm: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            RetrofitClient.apiService.updateDeviceLocation(
+                requestBody = LocationUpdateRequest(
+                    token = fcm,
+                    latitude = 20.980913,
+                    longitude = 105.787406
+                )
+            )
+        }
+    }
+
 }

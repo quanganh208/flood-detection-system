@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -33,6 +34,7 @@ import com.example.colorphone.domain.models.DeviceModel
 import com.example.colorphone.domain.models.WaterStatus
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
+import com.google.firebase.messaging.FirebaseMessaging
 import com.google.gson.JsonElement
 import com.mapbox.geojson.LineString
 import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
@@ -68,6 +70,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>(ActivityMainBinding::infl
     private lateinit var cameraOptions: CameraOptions
     private lateinit var requestPermissionLauncher: ActivityResultLauncher<Array<String>>
 
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -79,7 +82,11 @@ class MainActivity : BaseActivity<ActivityMainBinding>(ActivityMainBinding::infl
 
         setupPermission()
 
+        requestNotificationPermission()
+
         checkLocationPermission()
+
+        getFCMToken()
 
         setContentView(binding.root)
 
@@ -385,7 +392,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>(ActivityMainBinding::infl
     private fun getStatusIcon(status: WaterStatus): Bitmap {
         return when (status) {
             WaterStatus.CRITICAL, WaterStatus.DANGER ->
-                bitmapFromResource(R.drawable.flood_icon)
+                bitmapFromResource(R.drawable.ic_flood_marker)
             WaterStatus.SAFE, WaterStatus.LOW ->
                 bitmapFromResource(R.drawable.ic_safe)
             else -> bitmapFromResource(R.drawable.ic_warning)
@@ -438,5 +445,56 @@ class MainActivity : BaseActivity<ActivityMainBinding>(ActivityMainBinding::infl
             supportFragmentManager,
             AlertsFragment.TAG
         )
+    }
+
+    fun requestNotificationPermission() {
+        // Chỉ cần xin quyền cho Android 13 (API 33) trở lên.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // TIRAMISU = API 33
+
+            // 2. Kiểm tra trạng thái hiện tại của quyền
+            when {
+                // Quyền đã được cấp (trường hợp phổ biến nhất sau khi user chấp nhận)
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED -> {
+                    // Quyền đã có, không cần làm gì thêm.
+//                    showToast("Quyền thông báo đã được cấp trước đó.")
+                }
+
+                // Nên giải thích cho người dùng (trường hợp người dùng đã từ chối lần trước)
+//                shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS) -> {
+//                    // 3. Hiển thị dialog giải thích lý do cần quyền (Tên hàm chỉ là ví dụ)
+//                    showPermissionRationaleDialog()
+//                }
+
+                // Yêu cầu xin quyền lần đầu hoặc khi không cần giải thích
+                else -> {
+                    // 4. Kích hoạt lời nhắc xin quyền của hệ thống
+                    requestPermissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                }
+            }
+        } else {
+            // Với các phiên bản Android cũ hơn (dưới 13), quyền đã được cấp khi cài đặt app.
+//            showToast("Quyền thông báo tự động được cấp.")
+        }
+    }
+
+    fun getFCMToken() {
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                Log.w("TAGG", "Fetching FCM registration token failed", task.exception)
+                return@addOnCompleteListener
+            }
+
+            // Token đã được lấy thành công
+            val token = task.result
+            Log.d("TAGG", "FCM Token: $token")
+
+            vm.updateFcm(token)
+
+            // PROPOSE: Gọi hàm gửi token lên server tại đây
+            // sendRegistrationToServer(token)
+        }
     }
 }
