@@ -32,8 +32,8 @@ export class SensorDataDto {
   rainDigital: boolean;
 
   @ApiProperty({
-    description: 'Water level sensor value (0-4095)',
-    example: 1500,
+    description: 'Water level sensor value (0-2000, giá trị thực tế của cảm biến)',
+    example: 1000,
   })
   waterLevel: number;
 

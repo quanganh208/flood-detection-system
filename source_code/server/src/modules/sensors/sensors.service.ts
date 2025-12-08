@@ -120,11 +120,12 @@ export class SensorsService {
   }
 
   private calculateWaterStatus(waterLevel: number): WaterStatus {
-    if (waterLevel < 683) return WaterStatus.SAFE;
-    if (waterLevel < 1365) return WaterStatus.LOW;
-    if (waterLevel < 2048) return WaterStatus.WARNING;
-    if (waterLevel < 3413) return WaterStatus.DANGER;
-    return WaterStatus.CRITICAL;
+    // Ngưỡng dựa trên giá trị thực tế của cảm biến (max ~2000)
+    if (waterLevel < 400) return WaterStatus.SAFE; // 0-20%
+    if (waterLevel < 800) return WaterStatus.LOW; // 20-40%
+    if (waterLevel < 1200) return WaterStatus.WARNING; // 40-60%
+    if (waterLevel < 1600) return WaterStatus.DANGER; // 60-80%
+    return WaterStatus.CRITICAL; // 80-100%
   }
 
   private async checkAndCreateAlerts(
@@ -143,19 +144,19 @@ export class SensorsService {
       alerts.push({
         type: 'WATER_DANGER',
         severity: 'CRITICAL',
-        message: `Muc nuoc cuc ky nguy hiem: ${data.waterLevel} (>3413)`,
+        message: `Muc nuoc cuc ky nguy hiem: ${data.waterLevel} (>=1600, >80%)`,
       });
     } else if (waterStatus === WaterStatus.DANGER) {
       alerts.push({
         type: 'WATER_DANGER',
         severity: 'HIGH',
-        message: `Muc nuoc nguy hiem: ${data.waterLevel} (2048-3413)`,
+        message: `Muc nuoc nguy hiem: ${data.waterLevel} (1200-1600, 60-80%)`,
       });
     } else if (waterStatus === WaterStatus.WARNING) {
       alerts.push({
         type: 'WATER_WARNING',
         severity: 'MEDIUM',
-        message: `Canh bao muc nuoc: ${data.waterLevel} (1365-2048)`,
+        message: `Canh bao muc nuoc: ${data.waterLevel} (800-1200, 40-60%)`,
       });
     }
 

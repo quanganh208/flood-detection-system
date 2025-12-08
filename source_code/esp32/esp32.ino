@@ -48,8 +48,9 @@ const int RAIN_DO_PIN = 25;
 const int WATER_AO_PIN = 35;
 
 // ===== THRESHOLDS =====
-const int WATER_WARNING_LEVEL = 2000;
-const int WATER_DANGER_LEVEL = 3000;
+// Ngưỡng dựa trên giá trị thực tế của cảm biến (max ~2000)
+const int WATER_WARNING_LEVEL = 800;   // 40% - bắt đầu cảnh báo
+const int WATER_DANGER_LEVEL = 1200;   // 60% - nguy hiểm
 const int RAIN_DRY_THRESHOLD = 3000;
 const int RAIN_WARNING_THRESHOLD = 2000;
 

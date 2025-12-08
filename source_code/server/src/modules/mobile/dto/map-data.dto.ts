@@ -31,7 +31,7 @@ export class DeviceMapItemDto {
   @ApiProperty({ description: 'Rain status', enum: ['DRY', 'LIGHT', 'HEAVY'] })
   rainStatus: string | null;
 
-  @ApiProperty({ description: 'Raw water level ADC value (0-4095)' })
+  @ApiProperty({ description: 'Raw water level ADC value (0-2000)' })
   waterLevel: number | null;
 
   @ApiProperty({ description: 'Raw rain analog value (0-4095)' })
