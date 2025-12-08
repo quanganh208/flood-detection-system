@@ -164,7 +164,9 @@ services:
       - MQTT_BROKER_URL=mqtt://mosquitto:1883
       - PLATFORMIO_BUILDER_URL=http://platformio-builder:5000
       - DATABASE_URL=postgresql://flood_user:flood_password@postgres:5432/flood_detection?schema=public
+      - FIREBASE_SERVICE_ACCOUNT_PATH=/app/firebase-adminsdk.json
     volumes:
+      - ./server/firebase-adminsdk.json:/app/firebase-adminsdk.json:ro
       - firmware-storage:/storage/firmware
       - uploads-storage:/storage/uploads
     depends_on:
