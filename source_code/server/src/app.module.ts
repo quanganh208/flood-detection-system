@@ -9,6 +9,7 @@ import { SensorsModule } from './modules/sensors/sensors.module';
 import { MqttModule } from './modules/mqtt/mqtt.module';
 import { DevicesModule } from './modules/devices/devices.module';
 import { MobileModule } from './modules/mobile/mobile.module';
+import { FcmModule } from './modules/fcm/fcm.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { MobileModule } from './modules/mobile/mobile.module';
     }),
 
     PrismaModule,
+    FcmModule,
     FirmwareModule,
     OtaModule,
     SensorsModule,

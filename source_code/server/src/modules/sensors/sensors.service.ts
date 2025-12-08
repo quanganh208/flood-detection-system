@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { FcmService, AlertNotificationData } from '../fcm/fcm.service';
 import { RainStatus, WaterStatus, SensorReading } from '@prisma/client';
 import { SensorDataDto } from './dto/sensor-data.dto';
 import { formatMacAddress } from '../../common/utils';
@@ -10,7 +11,12 @@ const DEDUP_WINDOW_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class SensorsService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(SensorsService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private fcmService: FcmService,
+  ) {}
 
   async processSensorData(data: SensorDataDto) {
     const device = await this.findOrCreateDevice(data);
@@ -168,6 +174,18 @@ export class SensorsService {
       });
     }
 
+    // Get device info for notifications
+    const device = await this.prisma.device.findUnique({
+      where: { id: deviceDbId },
+      select: {
+        deviceId: true,
+        name: true,
+        location: true,
+        latitude: true,
+        longitude: true,
+      },
+    });
+
     for (const alert of alerts) {
       const existingAlert = await this.prisma.alert.findFirst({
         where: {
@@ -179,7 +197,7 @@ export class SensorsService {
       });
 
       if (!existingAlert) {
-        await this.prisma.alert.create({
+        const createdAlert = await this.prisma.alert.create({
           data: {
             deviceId: deviceDbId,
             type: alert.type,
@@ -189,6 +207,27 @@ export class SensorsService {
             rainAnalog: data.rainAnalog,
           },
         });
+
+        // Send FCM notification for new alerts
+        if (device) {
+          const notificationData: AlertNotificationData = {
+            alertId: createdAlert.id,
+            deviceId: device.deviceId,
+            deviceName: device.name,
+            type: alert.type,
+            severity: alert.severity,
+            waterLevel: data.waterLevel,
+            rainAnalog: data.rainAnalog,
+            latitude: device.latitude ?? undefined,
+            longitude: device.longitude ?? undefined,
+            location: device.location ?? undefined,
+          };
+
+          // Send notification asynchronously (don't await to not block sensor processing)
+          this.fcmService.sendAlertNotification(notificationData).catch((error) => {
+            this.logger.error('Failed to send FCM notification', error);
+          });
+        }
       }
     }
   }

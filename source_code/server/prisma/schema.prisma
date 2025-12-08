@@ -235,6 +235,43 @@ model OTAUpdate {
   @@map("ota_updates")
 }
 
+// ===== FCM TOKENS =====
+
+model FcmToken {
+  id              String          @id @default(uuid())
+  token           String          @unique  // FCM registration token
+  
+  // Device info
+  platform        Platform        @default(ANDROID)
+  deviceModel     String?         // e.g., "Samsung Galaxy S21"
+  osVersion       String?         // e.g., "Android 14"
+  appVersion      String?         // App version
+  
+  // User preferences (optional)
+  userId          String?         // Optional user identifier
+  
+  // Subscription settings
+  isActive        Boolean         @default(true)
+  subscribedToAlerts    Boolean   @default(true)
+  subscribedToNews      Boolean   @default(false)
+  
+  // Location-based notifications (optional)
+  latitude        Float?
+  longitude       Float?
+  notifyRadius    Float?          @default(5.0) // km
+  
+  // Token lifecycle
+  lastUsedAt      DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([token])
+  @@index([userId])
+  @@index([isActive, subscribedToAlerts])
+  @@index([latitude, longitude])
+  @@map("fcm_tokens")
+}
+
 // ===== ENUMS =====
 
 // Rain sensor (INVERTED: high value = dry, low value = wet)
@@ -311,4 +348,11 @@ enum DeployStatus {
   FAILED
   CANCELLED
   ROLLED_BACK
+}
+
+// Mobile platform
+enum Platform {
+  ANDROID
+  IOS
+  WEB
 }
