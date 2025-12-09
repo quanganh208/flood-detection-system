@@ -1,10 +1,12 @@
 package com.example.colorphone.data.remote.dto
 
+import android.os.Parcelable
 import com.example.colorphone.data.remote.StatusAdapter
 import com.example.colorphone.domain.models.RainStatus
 import com.example.colorphone.domain.models.WaterStatus
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
+import kotlinx.parcelize.Parcelize
 
 @JsonClass(generateAdapter = true)
 data class Device(

@@ -217,6 +217,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>(ActivityMainBinding::infl
         val constantState = sourceDrawable.constantState ?: return null
         val drawable = constantState.newDrawable().mutate()
 
+//        val bitmap = createBitmap(drawable.intrinsicWidth, drawable.intrinsicHeight)
         val bitmap = createBitmap(drawable.intrinsicWidth, drawable.intrinsicHeight)
         val canvas = Canvas(bitmap)
         drawable.setBounds(0, 0, canvas.width, canvas.height)
@@ -298,14 +299,14 @@ class MainActivity : BaseActivity<ActivityMainBinding>(ActivityMainBinding::infl
         val annotationApi = mapView.annotations
         val pointAnnotationManager = annotationApi.createPointAnnotationManager()
 
-        val myBitmap = bitmapFromDrawableRes(R.drawable.ic_my_location) ?: return
+        val myBitmap = bitmapFromDrawableRes(R.drawable.ic_location) ?: return
 
         val myLocation = Point.fromLngLat(longitude, latitude)
 
         val pointAnnotationOptions = PointAnnotationOptions()
             .withPoint(myLocation)
             .withIconImage(myBitmap)
-            .withIconSize(1.2)
+            .withIconSize(0.15)
             .withTextField("Here")
             .withTextOffset(listOf(0.0, 2.0))
             .withTextColor("blue")
@@ -400,35 +401,23 @@ class MainActivity : BaseActivity<ActivityMainBinding>(ActivityMainBinding::infl
     }
 
     private fun showDeviceDetailsDialog(jsonData: JsonElement?) {
-        val deviceId = jsonData?.asString ?: return // Exit if ID is null or missing
-
+        // ... (Phần tìm device giống như code cũ)
+        Log.d("TAGG", "showDeviceDetailsDialog: $jsonData")
+        val deviceId = jsonData?.asString ?: return
         val device = vm.devicesState.value.find { it.id == deviceId }
 
+        Log.d("TAGG", "showDeviceDetailsDialog: $device")
+
         if (device == null) {
-            // Handle case where data is stale or ID is bad
-            // Toast.makeText(this, "Device details not found.", Toast.LENGTH_SHORT).show()
+            // Xử lý lỗi
             return
         }
-
-        // 3. Construct the detail message string
-        val message = """
-        Online Status: ${if (device.isOnline) "🟢 Online" else "🔴 Offline"}
-        Water Status: ${device.waterStatus}
-        Rain Status: ${device.rainStatus}
-        Water Level: ${device.waterLevel ?: "N/A"}
-        Last Update: ${device.lastUpdateDisplay}
-        Alert Count: ${device.alertCount}
-        Coordinates: (${device.coordinate?.first?.format(4)}, ${device.coordinate?.second?.format(4)})
-    """.trimIndent()
-
-        // 4. Build and show the AlertDialog
-        AlertDialog.Builder(this)
-            .setTitle("Details: ${device.name}")
-            .setMessage(message)
-            .setPositiveButton("Close") { dialog, _ ->
-                dialog.dismiss()
-            }
-            .show()
+        
+        // 💡 SỬA ĐỔI: Thay thế AlertDialog bằng DialogFragment tùy chỉnh
+        DeviceDetailsDialogFragment.newInstance(device).show(
+            supportFragmentManager, // Sử dụng fragmentManager của Activity/Fragment
+            DeviceDetailsDialogFragment.TAG
+        )
     }
 
     // Helper extension to format Doubles for display (optional)
